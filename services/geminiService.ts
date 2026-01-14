@@ -4,9 +4,11 @@ import { DEFAULT_TEAM } from "../constants";
 import { learningService } from "./learningService";
 
 // LISTA DE MODELOS - ORDEM DE INTELIGÊNCIA
+// Usamos o Flash Preview mais recente para chat rápido e fluido
 const MODEL_CANDIDATES = [
-  'gemini-3-pro-preview',      // Cérebro Principal (Raciocínio)
-  'gemini-3-flash-preview',    // Backup Rápido
+  'gemini-2.0-flash-exp',      // Extremamente rápido e inteligente para chat
+  'gemini-1.5-pro',            // Backup de raciocínio
+  'gemini-1.5-flash'           // Backup de estabilidade
 ];
 
 const cleanKey = (key: string | undefined): string => {
@@ -71,14 +73,13 @@ const notifyTeamFunction: FunctionDeclaration = {
   },
 };
 
-// NOVA TOOL DE APRENDIZADO
 const saveKnowledgeFunction: FunctionDeclaration = {
   name: 'save_knowledge',
   description: 'Use esta função para MEMORIZAR uma nova regra, correção ou preferência ensinada pelo usuário.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      fact: { type: Type.STRING, description: "O fato ou regra a ser memorizada. Ex: 'Não atendemos aposentadoria rural', 'O prazo para recurso X é 15 dias'." },
+      fact: { type: Type.STRING, description: "O fato ou regra a ser memorizada." },
       category: { type: Type.STRING, enum: ["preference", "legal_rule", "correction", "vocabulary"] }
     },
     required: ['fact', 'category'],
@@ -101,19 +102,15 @@ export const sendMessageToGemini = async (
   if (apiKeys.length === 0) return "⚠️ Erro: Chave de API não configurada.";
   apiKeys = shuffleArray(apiKeys);
 
-  // 1. CARREGA MEMÓRIAS APRENDIDAS (RAG SIMPLES)
   const memories = await learningService.getAllMemories();
   const knowledgeBase = memories.map(m => `- [APRENDIZADO]: ${m.content}`).join('\n');
 
-  // 2. CONSTRUÇÃO DO CONTEXTO AVANÇADO
   let finalPrompt = systemInstruction;
 
-  // Injeta Aprendizados (Cérebro Evolutivo)
   if (memories.length > 0) {
-    finalPrompt += `\n\n### 🧠 MINHA MEMÓRIA EVOLUTIVA (REGRAS APRENDIDAS):\nSiga estas instruções acima de qualquer outra regra padrão:\n${knowledgeBase}`;
+    finalPrompt += `\n\n### 🧠 MINHA MEMÓRIA EVOLUTIVA:\n${knowledgeBase}`;
   }
 
-  // Injeta Equipe
   try {
      const savedTeam = localStorage.getItem('mara_team_config');
      const team: TeamMember[] = savedTeam ? JSON.parse(savedTeam) : DEFAULT_TEAM;
@@ -121,22 +118,20 @@ export const sendMessageToGemini = async (
      finalPrompt += `\n\n### 👥 NOSSA EQUIPE:\n${teamList}`;
   } catch(e) {}
 
-  // Injeta Contexto do Caso
   if (contactContext?.legalSummary) {
-    finalPrompt += `\n\n### 📂 MEMÓRIA DESTE CASO ESPECÍFICO:\n"${contactContext.legalSummary}"\n(Use isso para não perguntar coisas repetidas).`;
+    finalPrompt += `\n\n### 📂 MEMÓRIA DO CASO:\n"${contactContext.legalSummary}"`;
   }
   
   if (contactContext?.caseStatus) {
-    finalPrompt += `\n\n### ⚖️ STATUS PROCESSUAL ATUAL:\n"${contactContext.caseStatus}"\n(Informe isso ao cliente se ele perguntar do processo).`;
+    finalPrompt += `\n\n### ⚖️ STATUS PROCESSUAL:\n"${contactContext.caseStatus}"`;
   }
 
-  // 3. PREPARAÇÃO DO HISTÓRICO
+  // Prepara histórico
   const recentHistory = history.slice(-30).map(m => ({
     role: m.role,
     parts: [{ text: m.type === 'audio' ? '[ÁUDIO ENVIADO PELO CLIENTE]' : m.content }]
   }));
 
-  // 4. PREPARAÇÃO DA MENSAGEM
   const currentParts: Part[] = [];
   
   if (newMessage.audioBase64) {
@@ -146,14 +141,14 @@ export const sendMessageToGemini = async (
         data: newMessage.audioBase64
       }
     });
-    currentParts.push({ text: "O usuário enviou este ÁUDIO. Interprete o português coloquial, gírias e erros gramaticais com perfeição. Foque na intenção jurídica." });
+    // Instrução reforçada para áudio
+    currentParts.push({ text: "O usuário enviou este ÁUDIO. Ouça, entenda o tom de voz e responda naturalmente." });
   }
   
   if (newMessage.text) {
     currentParts.push({ text: newMessage.text });
   }
 
-  // 5. LOOP DE TENTATIVAS
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
 
@@ -164,7 +159,7 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.4, // Mais baixa para seguir rigorosamente os "Aprendizados"
+            temperature: 0.7, // Aumentado para maior fluidez e naturalidade na conversa
           },
           history: recentHistory
         });
@@ -175,22 +170,15 @@ export const sendMessageToGemini = async (
         
         let responseText = result.text || "";
 
-        // PROCESSAMENTO DE TOOLS (Recursivo para permitir Learn -> Response -> Learn)
         if (result.functionCalls && result.functionCalls.length > 0) {
            for (const call of result.functionCalls) {
-             
-             // TOOL: Salvar Aprendizado
              if (call.name === 'save_knowledge') {
                 await learningService.addMemory(call.args.fact, call.args.category);
-                
-                // Informa a IA que foi salvo
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "Memorizado com sucesso." } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Memorizado." } } }]
                 });
                 responseText = toolResp.text;
              }
-             
-             // TOOL: Notificar Equipe
              else if (call.name === 'notificar_equipe' && onToolCall) {
                 onToolCall({ name: call.name, args: call.args });
                 const toolResp = await chat.sendMessage({
@@ -209,7 +197,8 @@ export const sendMessageToGemini = async (
     }
   }
 
-  return "Desculpe, a conexão oscilou. Poderia repetir?";
+  // Fallback se tudo falhar, mas tenta não deixar vazio
+  return "Olá! Tive uma pequena oscilação no sinal, mas já voltei. Poderia repetir a última parte?";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
@@ -219,10 +208,10 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
   try {
     const ai = new GoogleGenAI({ apiKey: keys[0] });
     await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       contents: "Ping",
     });
-    return { success: true, message: "Conexão Estabelecida com Sucesso." };
+    return { success: true, message: "Conexão OK!" };
   } catch (e: any) {
     return { success: false, message: e.message };
   }
