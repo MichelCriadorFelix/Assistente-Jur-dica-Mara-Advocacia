@@ -40,7 +40,6 @@ const SettingsScreen: React.FC = () => {
       const result = await testConnection();
       if (result.success) {
         setTestResult(`✅ SUCESSO! ${result.message} | Chave: ...${result.keyUsed}`);
-        // Atualiza a UI com o modelo descoberto
         const wm = localStorage.getItem('mara_working_model');
         if (wm) setWorkingModel(wm);
       } else {
@@ -87,10 +86,12 @@ const SettingsScreen: React.FC = () => {
 
   const isSupabaseActive = !!localStorage.getItem('mara_supabase_key');
 
+  // Lista de variáveis para diagnóstico
   const varsToDiagnose = [
     { name: "VITE_APP_PARAM_3", val: (import.meta as any).env?.VITE_APP_PARAM_3 },
+    { name: "API_KEY (Sem VITE)", val: (process.env as any).API_KEY },
+    { name: "GOOGLE_API_KEY (Sem VITE)", val: (process.env as any).GOOGLE_API_KEY },
     { name: "VITE_ux_config", val: (import.meta as any).env?.VITE_ux_config },
-    { name: "VITE_APP_PARAM_1", val: (import.meta as any).env?.VITE_APP_PARAM_1 },
   ];
 
   return (
