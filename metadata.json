@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Mara - Assistente Jurídica",
+  "description": "Sistema de atendimento jurídico automatizado com IA (Gemini), simulando interface WhatsApp e Dashboard Administrativo.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
