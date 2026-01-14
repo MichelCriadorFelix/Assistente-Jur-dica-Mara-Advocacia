@@ -75,10 +75,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   }, [messages, isLoading]);
 
   const handleResetConversation = () => {
-    if (confirm("Deseja apagar tudo e reiniciar o teste do zero?")) {
+    if (confirm("Tem certeza que deseja apagar essa conversa e iniciar um novo teste do zero?")) {
       localStorage.removeItem('mara_contact_id');
+      // Força recarregamento para garantir estado limpo
       window.location.reload();
     }
+    setShowMenu(false);
   };
 
   const handleSendMessage = async (text?: string, audioBlob?: Blob) => {
@@ -174,8 +176,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
            style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")' }}>
       </div>
 
-      {/* Header */}
-      <div className="bg-[#00a884] p-3 flex items-center justify-between shadow-md z-10 text-white relative">
+      {/* Header - Z-Index Aumentado para 50 para garantir sobreposição ao chat */}
+      <div className="bg-[#00a884] p-3 flex items-center justify-between shadow-md z-50 text-white relative">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="p-1 hover:bg-white/20 rounded-full transition-colors">
             <ArrowLeft className="w-6 h-6" />
@@ -194,26 +196,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         <div className="flex gap-4 pr-2 opacity-80 relative">
           <Video className="w-5 h-5 cursor-not-allowed" />
           <Phone className="w-5 h-5 cursor-not-allowed" />
-          <button onClick={() => setShowMenu(!showMenu)}>
+          <button onClick={() => setShowMenu(!showMenu)} className="hover:bg-white/10 rounded-full p-1 transition">
             <MoreVertical className="w-5 h-5 cursor-pointer" />
           </button>
           
-          {/* Dropdown Menu */}
+          {/* Dropdown Menu - Agora visível graças ao z-50 do pai */}
           {showMenu && (
-            <div className="absolute right-0 top-10 bg-white rounded-lg shadow-xl py-2 w-48 z-50 animate-in fade-in slide-in-from-top-2">
+            <div className="absolute right-0 top-12 bg-white rounded-lg shadow-xl py-2 w-56 z-50 animate-in fade-in slide-in-from-top-2 border border-gray-100">
               <button 
                 onClick={handleResetConversation}
-                className="w-full text-left px-4 py-3 hover:bg-gray-100 text-red-600 flex items-center gap-2"
+                className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 flex items-center gap-2 transition-colors font-medium"
               >
-                <Trash2 className="w-4 h-4" /> Resetar Teste
+                <Trash2 className="w-4 h-4" /> Reiniciar Conversa
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Área de Mensagens */}
-      <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3 pb-20">
+      {/* Área de Mensagens - z-10 mantém abaixo do header */}
+      <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3 pb-20 scroll-smooth">
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
           return (
@@ -252,7 +254,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
+      {/* Input Area - z-20 mantém acima das mensagens mas abaixo do header */}
       <div className="absolute bottom-0 w-full bg-[#f0f2f5] p-2 flex items-center gap-2 z-20 border-t border-gray-200">
         <input
           type="text"
@@ -276,6 +278,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           <AudioRecorder onAudioRecorded={(blob) => handleSendMessage(undefined, blob)} disabled={isLoading} />
         )}
       </div>
+      
+      {/* Overlay para fechar menu ao clicar fora */}
+      {showMenu && (
+        <div 
+          className="absolute inset-0 z-40 bg-transparent"
+          onClick={() => setShowMenu(false)}
+        ></div>
+      )}
     </div>
   );
 };
