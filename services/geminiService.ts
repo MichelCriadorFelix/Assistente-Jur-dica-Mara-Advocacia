@@ -1,11 +1,9 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// Chaves de backup hardcoded (caso as variaveis de ambiente falhem)
-const BACKUP_KEYS = [
-  "AIzaSyD-8oeV2Ojwl3a5q9Fe7RkdQ2QROehlljY", 
-  "AIzaSyAKn6TpoKlcyuLESez4GMSMeconldxfYNk"
-];
+// IMPORTANTE: Removemos chaves hardcoded para evitar erro de "Key Leaked".
+// O sistema deve depender exclusivamente das chaves do usuário (LocalStorage) ou Vercel.
+const BACKUP_KEYS: string[] = [];
 
 // Helper para pegar o modelo configurado ou usar o padrão
 const getModelName = (): string => {
@@ -27,9 +25,8 @@ const getAvailableApiKeys = (): string[] => {
   }
 
   // 2. Variáveis de Ambiente (Vercel / Build Time)
-  // Tentamos todas as variações possíveis para garantir que pegamos o que está no Vercel
   const possibleEnvKeys = [
-    // Vercel Environment Variables (Node/Next style replacement)
+    // Next.js / Standard Node
     process.env.API_KEY_3,
     process.env.API_KEY_2,
     process.env.API_KEY_1,
@@ -37,7 +34,7 @@ const getAvailableApiKeys = (): string[] => {
     process.env.NEXT_PUBLIC_API_KEY_2,
     process.env.NEXT_PUBLIC_API_KEY_1,
     
-    // Vite Environment Variables
+    // Vite Prefix
     (import.meta as any).env?.VITE_API_KEY_3,
     (import.meta as any).env?.VITE_API_KEY_2,
     (import.meta as any).env?.VITE_API_KEY_1,
@@ -51,12 +48,12 @@ const getAvailableApiKeys = (): string[] => {
     }
   });
 
-  // 3. Adicionar Backups Hardcoded (apenas se não tivermos chaves suficientes)
+  // 3. Backups (Se houver)
   BACKUP_KEYS.forEach(k => {
     if (!keys.includes(k)) keys.push(k);
   });
 
-  // Remove duplicatas e retorna
+  // Remove duplicatas e valores vazios
   return [...new Set(keys)].filter(k => !!k);
 };
 
@@ -88,7 +85,7 @@ export const sendMessageToGemini = async (
   const modelName = getModelName();
   
   if (apiKeys.length === 0) {
-    return "⚠️ Erro Crítico: Nenhuma chave de API encontrada no sistema. Verifique as configurações na Vercel.";
+    return "⚠️ Erro Crítico: Nenhuma chave de API válida encontrada. Por favor, adicione uma chave nas Configurações ou verifique as variáveis de ambiente da Vercel (prefixo VITE_ ou NEXT_PUBLIC_).";
   }
 
   console.log(`[Mara System] Iniciando processamento. ${apiKeys.length} chaves de API disponíveis.`);
@@ -123,10 +120,8 @@ export const sendMessageToGemini = async (
   for (const apiKey of apiKeys) {
     attempts++;
     try {
-      // Log seguro (mostra apenas os ultimos 4 digitos)
-      console.log(`[Tentativa ${attempts}/${apiKeys.length}] Conectando com chave ...${apiKey.slice(-4)} usando modelo ${modelName}`);
+      console.log(`[Tentativa ${attempts}/${apiKeys.length}] Conectando com chave final ...${apiKey.slice(-4)}`);
       
-      // Cria instância nova para cada tentativa para garantir que usa a chave do loop
       const ai = new GoogleGenAI({ apiKey });
 
       const chat = ai.chats.create({
@@ -138,11 +133,8 @@ export const sendMessageToGemini = async (
       const result = await chat.sendMessage({ message: currentParts });
       const response = result;
 
-      // Se sucesso, processa chamadas de função se houver
       if (response.functionCalls && response.functionCalls.length > 0) {
         const call = response.functionCalls[0];
-        console.log("[Tool Call] IA solicitou ação:", call.name);
-        
         if (onToolCall) onToolCall({ name: call.name, args: call.args });
 
         const functionResponse = { result: "Sucesso. Equipe notificada." };
@@ -152,38 +144,50 @@ export const sendMessageToGemini = async (
         return finalResult.text || "";
       }
 
-      // Sucesso absoluto, retorna o texto e sai do loop
       return response.text || "";
 
     } catch (error: any) {
       lastError = error;
       const errorMsg = error.message || JSON.stringify(error);
       
-      const isQuotaError = errorMsg.includes('429') || errorMsg.includes('403') || errorMsg.includes('Quota') || errorMsg.includes('Resource has been exhausted');
+      // Erros de Cota (429) ou Exaustão
+      const isQuotaError = errorMsg.includes('429') || 
+                           errorMsg.includes('Quota') || 
+                           errorMsg.includes('Resource has been exhausted');
       
-      if (isQuotaError) {
-        console.warn(`[Limite Atingido] Chave ...${apiKey.slice(-4)} falhou. Tentando próxima chave...`);
-        continue; // PULA para a próxima iteração do loop (próxima chave)
+      // Erros de Chave Inválida/Vazada/Permissão (403)
+      // Se a chave vazou, temos que pular para a próxima imediatamente
+      const isKeyError = errorMsg.includes('403') || 
+                         errorMsg.includes('PERMISSION_DENIED') || 
+                         errorMsg.includes('leaked') ||
+                         errorMsg.includes('key expired') ||
+                         errorMsg.includes('not valid');
+      
+      if (isQuotaError || isKeyError) {
+        console.warn(`[Chave Falhou] Chave ...${apiKey.slice(-4)} rejeitada (Cota ou Permissão). Tentando próxima...`);
+        continue; // PULA para a próxima chave
       }
 
-      // Se for erro de modelo não encontrado (404), não adianta trocar a chave, é erro de config
       if (errorMsg.includes('404') || errorMsg.includes('not found')) {
-         console.error(`[Erro Config] Modelo ${modelName} não existe.`);
-         return `⚠️ Erro de Configuração (404): O modelo '${modelName}' não foi encontrado. Vá em Configurações e mude para 'gemini-1.5-flash'.`;
+         return `⚠️ Erro de Configuração (404): O modelo '${modelName}' não foi encontrado. Vá em Configurações e mude para 'gemini-1.5-flash-8b'.`;
       }
 
-      console.warn(`[Erro Técnico] Falha na chave ...${apiKey.slice(-4)}:`, errorMsg);
-      // Se for outro erro (ex: rede), tentamos a próxima chave por garantia
+      console.warn(`[Erro Técnico Genérico] Falha na chave ...${apiKey.slice(-4)}:`, errorMsg);
+      // Tenta a próxima chave mesmo em erro genérico para garantir resiliência
       continue;
     }
   }
   
-  // Se chegou aqui, TODAS as chaves falharam
   console.error("[FALHA TOTAL] Todas as chaves de API falharam.");
   
-  if (lastError?.message?.includes('429') || lastError?.message?.includes('Quota')) {
-    return "⚠️ Mara indisponível momentaneamente (Alto volume de acessos). Tente novamente em 1 minuto.";
+  // Tratamento de mensagem final para o usuário
+  if (lastError?.message?.includes('403') || lastError?.message?.includes('PERMISSION_DENIED')) {
+      return "⚠️ Erro de Autenticação: Todas as chaves de API fornecidas foram rejeitadas pelo Google (Vazamento ou Permissão). Verifique as Configurações.";
   }
 
-  return `⚠️ Erro Técnico na IA: ${lastError?.message || 'Não foi possível conectar aos servidores.'}`;
+  if (lastError?.message?.includes('429')) {
+    return "⚠️ Mara indisponível momentaneamente (Alto tráfego). Tente novamente em 1 minuto.";
+  }
+
+  return `⚠️ Erro Técnico: ${lastError?.message || 'Falha na conexão com IA'}`;
 };
