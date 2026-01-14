@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MoreVertical, Phone, Video, ArrowLeft } from 'lucide-react';
+import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2 } from 'lucide-react';
 import AudioRecorder from './AudioRecorder';
 import { Message, AppConfig } from '../types';
 import { sendMessageToGemini } from '../services/geminiService';
@@ -17,51 +17,48 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   const [contactId, setContactId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Initialize Session (Get or Create Contact ID)
+  // Inicialização da Sessão
   useEffect(() => {
     const initSession = async () => {
-      // Try to recover session from local storage to keep history on refresh
       const storedId = localStorage.getItem('mara_contact_id');
       try {
         const id = await chatService.getOrCreateContact(storedId);
         setContactId(id);
         localStorage.setItem('mara_contact_id', id);
 
-        // Load History
         const history = await chatService.loadMessages(id);
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Initial greeting - MENU DE ADVOGADOS
+           // Mensagem de Boas-vindas Padrão (Não salva no banco ainda, só visual)
+           // Isso orienta o usuário sobre o que fazer
            const initialMsg: Message = {
-             id: 'init', 
+             id: 'init-welcome', 
              role: 'model', 
-             content: 'Olá! Sou a Mara, da Felix e Castro Advocacia.\n\nPara iniciarmos, com qual especialista você gostaria de falar?\n\n1️⃣ *Dr. Michel Felix* (INSS / Aposentadoria)\n2️⃣ *Dra. Luana Castro* (Trabalhista)\n3️⃣ *Dra. Flávia Zacarias* (Família / Divórcio)\n\nPor favor, me diga o nome do advogado ou a área do seu caso.', 
+             content: 'Olá! Sou a Mara, assistente virtual da Felix e Castro Advocacia. ⚖️\n\nPara agilizar seu atendimento, por favor me diga:\n\nCom qual especialista você deseja falar?\n\n1️⃣ *Dr. Michel Felix* (Previdenciário/INSS)\n2️⃣ *Dra. Luana Castro* (Trabalhista)\n3️⃣ *Dra. Flávia Zacarias* (Família)', 
              type: 'text', 
              timestamp: new Date()
            };
            setMessages([initialMsg]);
         }
       } catch (e) {
-        console.error("Failed to init chat session", e);
+        console.error("Falha ao iniciar sessão de chat", e);
       }
     };
     initSession();
   }, []);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // Auto-scroll sempre que mensagens mudam
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
   const handleSendMessage = async (text?: string, audioBlob?: Blob) => {
-    if ((!text && !audioBlob) || !contactId) return;
+    if ((!text && !audioBlob) || !contactId || isLoading) return;
 
-    const newMessage: Message = {
-      id: Date.now().toString(), // Temp ID
+    // 1. Cria objeto da mensagem do usuário
+    const userMsg: Message = {
+      id: Date.now().toString(),
       role: 'user',
       content: text || 'Áudio enviado',
       type: audioBlob ? 'audio' : 'text',
@@ -69,18 +66,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       audioUrl: audioBlob ? URL.createObjectURL(audioBlob) : undefined
     };
 
-    // Optimistic UI update
-    const newHistory = [...messages, newMessage];
-    setMessages(newHistory);
+    // 2. Atualiza UI imediatamente (Optimistic)
+    const currentHistory = [...messages, userMsg];
+    setMessages(currentHistory);
     setInputText('');
     setIsLoading(true);
 
-    // Persist User Message
-    await chatService.saveMessage(contactId, newMessage);
-
     try {
+      // 3. Persiste mensagem do usuário no serviço
+      await chatService.saveMessage(contactId, userMsg);
+
+      // 4. Prepara áudio se houver
       let audioBase64: string | undefined;
-      
       if (audioBlob) {
         audioBase64 = await new Promise((resolve) => {
           const reader = new FileReader();
@@ -92,23 +89,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         });
       }
 
-      // Call AI
+      // 5. Envia para IA
+      // Filtramos a mensagem inicial 'fake' visual do histórico técnico se ela não estiver no banco, 
+      // mas o prompt do sistema já orienta a IA, então enviamos o histórico limpo.
       const responseText = await sendMessageToGemini(
-        newHistory, 
+        currentHistory.filter(m => m.id !== 'init-welcome'), 
         { text, audioBase64 }, 
         config.systemPrompt,
         async (toolCall) => {
-          // If the AI calls 'notificar_equipe', we update the contact status in DB
           if (toolCall.name === 'notificar_equipe') {
-             const { clientName, summary, priority } = toolCall.args;
-             console.log("Tool Triggered:", toolCall.args);
-             // Update contact name if AI detected it
-             await chatService.updateContactStatus(contactId, 'triaged', clientName);
+             await chatService.updateContactStatus(contactId, 'triaged', toolCall.args.clientName);
           }
         }
       );
 
-      const botMessage: Message = {
+      // 6. Processa resposta da IA
+      const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'model',
         content: responseText,
@@ -116,22 +112,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         timestamp: new Date()
       };
 
-      setMessages(prev => [...prev, botMessage]);
-      
-      // Persist Bot Message
-      await chatService.saveMessage(contactId, botMessage);
+      setMessages(prev => [...prev, botMsg]);
+      await chatService.saveMessage(contactId, botMsg);
 
     } catch (error) {
       console.error(error);
-      // Fallback UI message in case of crash
-      const errorMessage: Message = {
+      const errorMsg: Message = {
         id: Date.now().toString(),
         role: 'model',
-        content: "Desculpe, tive um erro de conexão momentâneo. Pode repetir?",
+        content: "⚠️ Falha na conexão. Por favor, tente novamente.",
         type: 'text',
         timestamp: new Date()
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsLoading(false);
     }
@@ -139,72 +132,70 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
 
   return (
     <div className="flex flex-col h-full bg-[#efeae2] relative overflow-hidden">
-      {/* Background Pattern */}
-      <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")' }}></div>
+      {/* Background WhatsApp */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none" 
+           style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")' }}>
+      </div>
 
       {/* Header */}
       <div className="bg-[#00a884] p-3 flex items-center justify-between shadow-md z-10 text-white">
         <div className="flex items-center gap-3">
-          {/* Botão Voltar (Visível sempre agora) */}
-          <button 
-            onClick={onBack} 
-            className="p-1 hover:bg-white/20 rounded-full transition-colors"
-            title="Voltar ao Painel"
-          >
+          <button onClick={onBack} className="p-1 hover:bg-white/20 rounded-full transition-colors">
             <ArrowLeft className="w-6 h-6" />
           </button>
           
-          <div className="w-10 h-10 rounded-full bg-white overflow-hidden p-1">
+          <div className="w-10 h-10 rounded-full bg-white overflow-hidden p-0.5">
              <img src="https://ui-avatars.com/api/?name=Mara+AI&background=0D8ABC&color=fff" alt="Mara" className="w-full h-full rounded-full" />
           </div>
           <div className="flex flex-col">
             <h1 className="font-semibold text-base leading-tight">Mara (IA Jurídica)</h1>
-            <span className="text-xs text-white/80">Online</span>
+            <span className="text-xs text-white/90 font-medium">
+              {isLoading ? 'Digitando...' : 'Online'}
+            </span>
           </div>
         </div>
-        <div className="flex gap-4 pr-2">
-          <Video className="w-5 h-5 cursor-pointer opacity-80 hover:opacity-100" />
-          <Phone className="w-5 h-5 cursor-pointer opacity-80 hover:opacity-100" />
-          <MoreVertical className="w-5 h-5 cursor-pointer opacity-80 hover:opacity-100" />
+        <div className="flex gap-4 pr-2 opacity-80">
+          <Video className="w-5 h-5 cursor-not-allowed" />
+          <Phone className="w-5 h-5 cursor-not-allowed" />
+          <MoreVertical className="w-5 h-5 cursor-pointer" />
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3">
+      {/* Área de Mensagens */}
+      <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3 pb-20">
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
-          // Clean JSON errors from display if they slipped through
-          const displayText = msg.content.startsWith('{"error"') ? "⚠️ Erro técnico no servidor." : msg.content;
-          
           return (
             <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
               <div 
-                className={`max-w-[80%] rounded-lg p-2 px-3 shadow-sm relative ${
-                  isUser ? 'bg-[#d9fdd3] rounded-tr-none' : 'bg-white rounded-tl-none'
+                className={`max-w-[85%] rounded-lg p-2 px-3 shadow-sm relative text-sm md:text-base ${
+                  isUser ? 'bg-[#d9fdd3] rounded-tr-none text-gray-800' : 'bg-white rounded-tl-none text-gray-800'
                 }`}
               >
                 {msg.type === 'audio' && msg.audioUrl ? (
-                  <div className="min-w-[200px] flex flex-col gap-1">
-                    <span className="text-xs text-gray-500 uppercase font-bold flex items-center gap-1">
-                      🎤 Áudio
-                    </span>
-                    <audio controls src={msg.audioUrl} className="w-full h-8" />
+                  <div className="min-w-[200px] flex items-center gap-2">
+                    <span className="text-xl">🎤</span>
+                    <audio controls src={msg.audioUrl} className="h-8 w-48" />
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{displayText}</p>
+                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                 )}
-                <span className="text-[10px] text-gray-500 block text-right mt-1">
+                <span className="text-[10px] text-gray-500 block text-right mt-1 opacity-70">
                   {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  {isUser && <span className="ml-1 text-blue-500">✓✓</span>}
+                  {isUser && <span className="ml-1 text-blue-500 font-bold">✓✓</span>}
                 </span>
               </div>
             </div>
           );
         })}
+        
+        {/* Indicador de Digitação (Bubble) */}
         {isLoading && (
-          <div className="flex justify-start">
-             <div className="bg-white rounded-lg p-2 shadow-sm rounded-tl-none">
-               <span className="text-gray-500 text-xs italic">Mara está digitando...</span>
+          <div className="flex justify-start animate-pulse">
+             <div className="bg-white rounded-lg p-3 shadow-sm rounded-tl-none flex gap-1 items-center">
+               <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+               <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+               <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
              </div>
           </div>
         )}
@@ -212,14 +203,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       </div>
 
       {/* Input Area */}
-      <div className="bg-gray-100 p-2 flex items-center gap-2 z-20">
+      <div className="absolute bottom-0 w-full bg-[#f0f2f5] p-2 flex items-center gap-2 z-20 border-t border-gray-200">
         <input
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputText)}
           placeholder="Digite uma mensagem..."
-          className="flex-1 rounded-lg border-none px-4 py-2 focus:ring-1 focus:ring-whatsapp-green outline-none bg-white shadow-sm"
+          className="flex-1 rounded-lg border-none px-4 py-3 focus:ring-1 focus:ring-whatsapp-green outline-none bg-white shadow-sm text-gray-700 placeholder-gray-400"
           disabled={isLoading}
         />
         
@@ -227,9 +218,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           <button 
             onClick={() => handleSendMessage(inputText)}
             disabled={isLoading}
-            className="p-3 bg-whatsapp-green rounded-full text-white shadow-sm hover:bg-emerald-600 transition"
+            className="p-3 bg-whatsapp-green rounded-full text-white shadow-md hover:bg-emerald-600 transition disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
           >
-            <Send className="w-5 h-5" />
+            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
         ) : (
           <AudioRecorder onAudioRecorded={(blob) => handleSendMessage(undefined, blob)} disabled={isLoading} />
