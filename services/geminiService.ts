@@ -84,7 +84,7 @@ const notifyTeamFunction: FunctionDeclaration = {
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
 // --- CÉREBRO NATIVO (INTELIGÊNCIA DE CONTINGÊNCIA) ---
-// Esta função substitui a IA quando há falhas, mas agora com MEMÓRIA E IDENTIDADE.
+// Esta função substitui a IA quando há falhas, mas agora com MEMÓRIA, IDENTIDADE E CAPACIDADE EXPLICATIVA.
 
 interface ConversationState {
   area: 'INSS' | 'TRABALHISTA' | 'FAMILIA' | 'UNKNOWN';
@@ -94,11 +94,13 @@ interface ConversationState {
   hasChildrenInfo: boolean;
   userName: string | null;
   honorific: string; // Sr. ou Sra.
+  isQuestioning: boolean; // O usuário está fazendo uma pergunta?
 }
 
 const analyzeHistory = (history: Message[], currentText: string): ConversationState => {
   const fullText = history.filter(m => m.role === 'user').map(m => m.content).join(' ') + ' ' + currentText;
   const lower = fullText.toLowerCase();
+  const currentLower = currentText.toLowerCase();
 
   const state: ConversationState = {
     area: 'UNKNOWN',
@@ -107,25 +109,29 @@ const analyzeHistory = (history: Message[], currentText: string): ConversationSt
     hasJobStatus: false,
     hasChildrenInfo: false,
     userName: null,
-    honorific: ''
+    honorific: '',
+    isQuestioning: false
   };
 
-  // 1. Detecção de Nome (Simples)
-  // Procura padrões como "Sou a Maria", "Meu nome é João", "Aqui é o Carlos"
+  // 1. Detecção de Dúvida/Pergunta do Usuário
+  if (currentLower.match(/(o que é|como funciona|pra que serve|tenho direito|não entendi|explica|dúvida|que senha|que isso)/)) {
+    state.isQuestioning = true;
+  }
+
+  // 2. Detecção de Nome (Simples)
   const nameMatch = fullText.match(/(?:sou|chamo|nome é|aqui é|fala o|fala a)\s+([A-Z][a-zà-ú]+)/);
   if (nameMatch) {
     state.userName = nameMatch[1];
-    // Inferência de Gênero básica para fallback
     if (state.userName.endsWith('a') || state.userName.endsWith('e')) state.honorific = 'Sra.';
     else state.honorific = 'Sr.';
   }
 
-  // 2. Detecção de Área (Com gírias e termos populares)
-  if (lower.match(/(inss|aposenta|benefício|loas|doença|perícia|auxílio|contribuição|idade|encostado|bpc|laudo)/)) state.area = 'INSS';
+  // 3. Detecção de Área
+  if (lower.match(/(inss|aposenta|benefício|loas|doença|perícia|auxílio|contribuição|idade|encostado|bpc|laudo|senha)/)) state.area = 'INSS';
   else if (lower.match(/(trabalh|patrão|empresa|demi|verba|fgts|salário|justa causa|botar no pau|acionar|direitos|acerto)/)) state.area = 'TRABALHISTA';
   else if (lower.match(/(família|divórcio|separação|pensão|guarda|inventário|pai|mãe|marido|esposa|filhos)/)) state.area = 'FAMILIA';
 
-  // 3. Extração de Dados
+  // 4. Extração de Dados
   if (lower.match(/(\d+)\s*(anos|idade)/) || lower.match(/(tenho)\s*(\d+)/)) state.hasAge = true;
   if (lower.match(/(\d+)\s*(anos|meses)\s*(de)?\s*(contribui|carteira|registro|tempo)/)) state.hasContribution = true;
   if (lower.match(/(sai|demiti|trabalhando|ainda estou|mandou|justa causa|assinada)/)) state.hasJobStatus = true;
@@ -144,18 +150,31 @@ const runNativeMara = async (
   
   const lower = lastUserText.toLowerCase().trim();
   const state = analyzeHistory(history, lastUserText);
-  
-  const treatment = state.userName ? `${state.honorific} ${state.userName}` : "";
+  const treatment = state.userName ? `${state.honorific} ${state.userName}` : "Sr(a).";
+
+  // 0. Prioridade: Responder Dúvidas (EDUCAÇÃO)
+  // Se o usuário fez uma pergunta, EXPLICAMOS antes de seguir o script.
+  if (state.isQuestioning) {
+     if (lower.includes('senha') || lower.includes('gov') || lower.includes('inss')) {
+        return `Boa pergunta, ${treatment}. \n\nA senha do 'Meu INSS' (ou Gov.br) é aquele cadastro único do governo. Nós precisamos dela para puxar seu extrato de contribuições (CNIS). Sem ela, o cálculo fica incompleto. \n\nO(A) senhor(a) lembra de ter feito esse cadastro ou tem anotado?`;
+     }
+     if (lower.includes('direito') || lower.includes('consigo')) {
+        return `Essa é a dúvida de muita gente, ${treatment}. \n\nPara saber se tem direito exato, precisamos analisar os documentos. Cada caso é único. Mas fique tranquilo(a), nosso escritório é especialista nisso. \n\nPode me contar mais detalhes para eu ajudar?`;
+     }
+     if (lower.includes('carteira') || lower.includes('sujar')) {
+        return `Não se preocupe com isso, ${treatment}. Buscar seus direitos na justiça não 'suja' sua carteira de trabalho para futuros empregos. Isso é um mito. O importante agora é não perder o prazo.`;
+     }
+     return `Entendi sua dúvida, ${treatment}. É um ponto importante. Vou pedir para o advogado explicar isso detalhadamente para você no atendimento presencial ou ligação, pode ser? \n\nEnquanto isso, me diga apenas mais uma coisa para eu adiantar o caso...`;
+  }
 
   // 1. Prioridade: Identidade
-  // Se não sabemos o nome e é o início da conversa, pergunte.
   if (!state.userName && history.length < 4 && !lower.match(/(nome|chamo|sou)/)) {
-     return "Olá! Sou a Mara, assistente da Felix e Castro Advocacia. 👋\n\nAntes de começarmos, com quem eu tenho o prazer de falar? (Qual seu nome?)";
+     return "Olá! Sou a Mara, assistente da Felix e Castro Advocacia. 👋\n\nAntes de conversarmos, qual é o seu nome, por favor? Assim posso te chamar corretamente.";
   }
 
   // 2. Prioridade: Prontuário
   if (caseContext && lower.match(/(como está|andamento|novidades|processo|status)/)) {
-     return `Oi ${treatment}! Consultei aqui o sistema rapidinho. \n\n${caseContext}\n\nFique tranquilo, estamos monitorando!`;
+     return `Oi ${treatment}! Consultei aqui o sistema. \n\n${caseContext}\n\nQualquer novidade te avisamos na hora!`;
   }
 
   // 3. LÓGICA DE DECISÃO POR ÁREA
@@ -164,38 +183,38 @@ const runNativeMara = async (
   if (state.area === 'INSS') {
     if (state.hasAge && state.hasContribution) {
        if (onToolCall) performHandover(history, lastUserText, "Dr. Michel Felix", onToolCall);
-       return `Perfeito, ${treatment}. Vi aqui que o(a) senhor(a) já tem a idade e o tempo. É um caso excelente para o Dr. Michel analisar. \n\nVou pedir para a secretária te chamar para agendar.`;
+       return `Entendi tudo, ${treatment}. \n\nCom sua idade e esse tempo de contribuição, temos boas chances de conseguir um benefício melhor. O Dr. Michel é 'expert' nisso. \n\nJá anotei tudo aqui. A Fabrícia vai te chamar para agendar o cálculo, ok?`;
     }
     if (!state.hasAge) {
-      return `Certo, ${treatment}. Para questões de INSS e aposentadoria, o Dr. Michel precisa saber: Qual a sua idade exata hoje?`;
+      return `Certo, ${treatment}. Para aposentadoria, cada mês conta. \n\nQual a sua idade exata hoje?`;
     }
-    return `Entendi. E sobre o tempo de trabalho: ${treatment}, sabe me dizer quantos anos tem de registro em carteira?`;
+    return `Entendi. E sobre o tempo de carteira assinada ou carnê: ${treatment}, o(a) senhor(a) sabe mais ou menos quantos anos somados já pagou ao INSS?`;
   }
 
   // --- ROTEIRO TRABALHISTA ---
   if (state.area === 'TRABALHISTA') {
     if (state.hasJobStatus) {
        if (onToolCall) performHandover(history, lastUserText, "Dra. Luana Castro", onToolCall);
-       return `Entendido, ${treatment}. Situações com a empresa precisam ser ágeis. Já registrei seu relato para a Dra. Luana Castro analisar os seus direitos. Aguarde nosso contato.`;
+       return `Compreendo, ${treatment}. \n\nNesses casos trabalhistas, temos prazos para entrar com a ação. Já passei seu relato com urgência para a Dra. Luana Castro. Vamos lutar pelos seus direitos. Aguarde nosso contato.`;
     }
-    return `Compreendo, ${treatment}. Problemas no trabalho são difíceis. \n\nMe diga: O(A) senhor(a) ainda está trabalhando na empresa ou já saiu?`;
+    return `Situação chata essa com a empresa, né ${treatment}? Sinto muito. \n\nMas me diga: você ainda está trabalhando lá ou já saiu (foi mandado embora)?`;
   }
 
   // --- ROTEIRO FAMÍLIA ---
   if (state.area === 'FAMILIA') {
      if (state.hasChildrenInfo) {
         if (onToolCall) performHandover(history, lastUserText, "Dra. Flávia Zacarias", onToolCall);
-        return `Certo, ${treatment}. Quando envolve família, cuidamos com carinho. Passei o caso para a Dra. Flávia. Ela vai analisar a questão.`;
+        return `Pode deixar comigo, ${treatment}. \n\nQuestões de família exigem delicadeza. A Dra. Flávia vai cuidar disso pessoalmente para proteger seus interesses. Nossa equipe vai entrar em contato.`;
      }
-     return `Entendi, ${treatment}. Para a Dra. Flávia te orientar melhor: Existem filhos menores de idade envolvidos nessa situação?`;
+     return `Entendi, ${treatment}. Para a Dra. Flávia te orientar sobre pensão ou guarda: Tem crianças menores de idade envolvidas?`;
   }
 
-  // --- ÁREA DESCONHECIDA (GENÉRICO INTELIGENTE) ---
+  // --- GENÉRICO INTELIGENTE ---
   if (lastUserText.length > 30) {
-     return `Li seu relato, ${treatment}. Parece ser importante. \n\nIsso tem a ver com direitos do Trabalho, INSS ou questão de Família? Me confirme para eu chamar o advogado certo.`;
+     return `Li com atenção seu relato, ${treatment}. \n\nPara eu chamar o especialista certo: Isso é mais sobre o seu Trabalho, sobre o INSS/Aposentadoria ou questão de Família?`;
   }
 
-  return `Entendo, ${treatment}. Estou te ouvindo. \n\nIsso que mencionou é sobre Trabalho, INSS ou Família? Me conte mais.`;
+  return `Entendo, ${treatment}. Estou te ouvindo atentamente. \n\nIsso que você falou é sobre Trabalho, INSS ou Família? Me conte um pouco mais.`;
 };
 
 // Helper para finalizar o atendimento no modo nativo
