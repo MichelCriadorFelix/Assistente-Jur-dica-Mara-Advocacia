@@ -1,55 +1,48 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Helper to check for manual overrides in LocalStorage (set via UI)
-const getLocalConfig = (key: string) => {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem(key);
+// Helper para ler configurações
+const getEnvVar = (key: string) => {
+  // 1. Tenta ler do import.meta.env (Vite standard)
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+    return import.meta.env[key];
   }
-  return null;
+  // 2. Tenta ler do process.env (Vercel/Node fallback)
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key];
+  }
+  return '';
 };
 
+// Configuração Automática
 const getSupabaseUrl = () => {
-  // 1. Manual Override
-  const local = getLocalConfig('mara_supabase_url');
+  // Prioridade: Configuração LocalStorage (Manual) > VITE > NEXT_PUBLIC (Vercel Default)
+  const local = typeof window !== 'undefined' ? localStorage.getItem('mara_supabase_url') : null;
   if (local) return local;
 
-  // 2. SUA URL DO SUPABASE (Fixa conforme print)
-  return 'https://drcxpekguouqsoinaoeb.supabase.co';
+  return getEnvVar('VITE_SUPABASE_URL') || getEnvVar('NEXT_PUBLIC_SUPABASE_URL');
 };
 
 const getSupabaseKey = () => {
-  // 1. Manual Override (Configurada na tela de Configurações)
-  const local = getLocalConfig('mara_supabase_key');
+  const local = typeof window !== 'undefined' ? localStorage.getItem('mara_supabase_key') : null;
   if (local) return local;
 
-  // 2. Env Vars (Vercel)
-  const envs = [
-    (import.meta as any).env,
-    (window as any).process?.env
-  ];
-
-  for (const env of envs) {
-     if (!env) continue;
-     if (env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-     if (env.VITE_SUPABASE_ANON_KEY) return env.VITE_SUPABASE_ANON_KEY;
-  }
-  
-  return '';
+  return getEnvVar('VITE_SUPABASE_ANON_KEY') || getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY');
 };
 
 const supabaseUrl = getSupabaseUrl();
 const supabaseAnonKey = getSupabaseKey();
 
-// Check if configured to avoid network errors
-export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey && !supabaseUrl.includes('placeholder') && supabaseAnonKey.length > 10);
+// Validação de segurança e conexão
+export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey && supabaseUrl.startsWith('http'));
 
 if (!isSupabaseConfigured) {
-  console.log("Supabase Parcialmente Configurado: URL encontrada, mas falta a CHAVE ANON.");
+  console.warn("⚠️ Supabase não detectado automaticamente. O app funcionará em modo LOCAL (apenas no navegador).");
+  console.log("Verifique se as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY estão definidas no Vercel.");
 } else {
-  console.log("Supabase Conectado:", supabaseUrl);
+  console.log("✅ Supabase Conectado via Variáveis de Ambiente.");
 }
 
-// Fallback to avoid crash during initialization
+// Cliente Supabase (usa placeholder se não configurado para não quebrar o app)
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co', 
   supabaseAnonKey || 'placeholder'
