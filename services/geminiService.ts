@@ -5,7 +5,8 @@ import { Message } from "../types";
 const MODEL_CANDIDATES = [
   'gemini-1.5-flash',          
   'gemini-1.5-flash-latest',   
-  'gemini-2.0-flash-exp',      
+  'gemini-2.0-flash-exp',
+  'gemini-1.5-pro'      
 ];
 
 const cleanKey = (key: string | undefined): string => {
@@ -22,10 +23,28 @@ const shuffleArray = (array: string[]) => {
   return newArr;
 };
 
-// Retorna chaves e seus NOMES (para debug)
+// Mapeia chaves explicitamente para garantir leitura
 export const getAvailableApiKeysMap = (): Record<string, string> => {
   const keysMap: Record<string, string> = {};
 
+  // 1. Tenta ler diretamente do process.env injetado pelo Vite (Define)
+  // O TypeScript pode reclamar, mas o Vite substituirá isso no build
+  const explicitKeys = [
+    { name: 'API_KEY_1', val: process.env.API_KEY_1 },
+    { name: 'API_KEY_2', val: process.env.API_KEY_2 },
+    { name: 'API_KEY_3', val: process.env.API_KEY_3 },
+    { name: 'API_KEY_4', val: process.env.API_KEY_4 },
+    { name: 'API_KEY_5', val: process.env.API_KEY_5 },
+    { name: 'API_KEY_6', val: process.env.API_KEY_6 },
+  ];
+
+  explicitKeys.forEach(k => {
+    if (k.val && k.val.length > 20 && k.val.startsWith('AIza')) {
+      keysMap[k.name] = k.val;
+    }
+  });
+
+  // 2. Fallback: Varredura genérica (caso use VITE_ prefixo)
   const envSources = [
     typeof process !== 'undefined' ? process.env : {},
     (import.meta as any).env || {}
@@ -34,8 +53,10 @@ export const getAvailableApiKeysMap = (): Record<string, string> => {
   envSources.forEach(source => {
     if (!source) return;
     Object.entries(source).forEach(([key, val]) => {
+      // Evita duplicar o que já pegamos explicitamente
+      if (keysMap[key]) return;
+
       if (typeof val === 'string' && val.startsWith('AIza') && val.length > 20) {
-        // Salva: "API_KEY_5": "AIza..."
         keysMap[key] = val;
       }
     });
@@ -49,7 +70,7 @@ export const getAvailableApiKeysMap = (): Record<string, string> => {
 
 export const getAvailableApiKeys = (): string[] => {
   const map = getAvailableApiKeysMap();
-  return [...new Set(Object.values(map))].map(cleanKey); // Remove duplicatas de valor
+  return [...new Set(Object.values(map))].map(cleanKey);
 };
 
 const notifyTeamFunction: FunctionDeclaration = {
@@ -70,12 +91,15 @@ const notifyTeamFunction: FunctionDeclaration = {
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
-  const keys = getAvailableApiKeys();
+  const keysMap = getAvailableApiKeysMap();
+  const keys = Object.values(keysMap);
+  
   if (keys.length === 0) return { success: false, message: "Nenhuma chave AIza encontrada." };
 
   let lastDetailedError = "";
 
-  for (const apiKey of keys) {
+  // Tenta cada chave
+  for (const [keyName, apiKey] of Object.entries(keysMap)) {
     const ai = new GoogleGenAI({ apiKey });
     
     for (const modelName of MODEL_CANDIDATES) {
@@ -87,7 +111,7 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
         
         return { 
           success: true, 
-          message: `CONECTADO! Modelo: ${modelName}`, 
+          message: `CONECTADO! (${keyName} -> ${modelName})`, 
           keyUsed: apiKey.slice(-4) 
         };
       } catch (e: any) {
@@ -110,17 +134,17 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   let apiKeys = getAvailableApiKeys();
-  if (apiKeys.length === 0) return "⚠️ **Erro Crítico**: Nenhuma chave API detectada no sistema. Verifique as configurações.";
+  if (apiKeys.length === 0) return "⚠️ **Erro Crítico**: Nenhuma chave API detectada. Faça Redeploy na Vercel.";
 
-  apiKeys = shuffleArray(apiKeys); // Tenta chaves em ordem aleatória
+  // Randomiza para balancear carga
+  apiKeys = shuffleArray(apiKeys);
 
   const savedModel = localStorage.getItem('mara_working_model');
   const preferredModel = savedModel && MODEL_CANDIDATES.includes(savedModel) ? savedModel : MODEL_CANDIDATES[0];
   const modelsToTry = [preferredModel, ...MODEL_CANDIDATES.filter(m => m !== preferredModel)];
 
-  // OTIMIZAÇÃO DE TOKENS: Pega apenas as últimas 8 mensagens
-  // Isso impede que conversas longas estourem a cota da API Gratuita
-  const recentHistory = history.slice(-8);
+  // Limita histórico para evitar estouro de tokens (causa principal do erro 429 em conversas longas)
+  const recentHistory = history.slice(-6); 
 
   const chatHistory: Content[] = recentHistory
     .filter(m => m.role !== 'system' && !m.content.includes('⚠️'))
@@ -142,9 +166,11 @@ export const sendMessageToGemini = async (
 
   let errorsLog = [];
 
+  // TENTA CHAVES EM CASCATA
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
 
+    // TENTA MODELOS EM CASCATA
     for (const model of modelsToTry) {
         try {
             const chat = ai.chats.create({
@@ -171,19 +197,20 @@ export const sendMessageToGemini = async (
 
             if (model !== savedModel) localStorage.setItem('mara_working_model', model);
             
+            // SUCESSO - RETORNA E ENCERRA
             return responseText;
 
         } catch (error: any) {
-            const errCode = error.message?.includes('429') ? 'QUOTA_EXCEEDED' : 'ERROR';
-            errorsLog.push(`${model} (${apiKey.slice(-4)}): ${errCode}`);
+            const isQuotaError = error.message?.includes('429') || error.message?.includes('Quota');
             
-            // Se for erro de Cota (429), tenta a próxima chave imediatamente
-            if (error.message?.includes('429') || error.message?.includes('Quota')) {
-                break; // Sai do loop de modelos e vai para próxima chave
+            // Se for cota, não tente outro modelo nesta chave, pule para PRÓXIMA CHAVE
+            if (isQuotaError) {
+                console.warn(`[Mara] Cota excedida na chave ...${apiKey.slice(-4)}`);
+                break; 
             }
         }
     }
   }
 
-  return `⚠️ **Mara Indisponível**\n\nTodas as chaves falharam.\nLogs: ${errorsLog.join('\n')}`;
+  return `⚠️ **Mara Indisponível (Erro de Cota)**\n\nO sistema tentou usar ${apiKeys.length} chaves diferentes e todas estão sem limite no momento. Aguarde 1 minuto.`;
 };

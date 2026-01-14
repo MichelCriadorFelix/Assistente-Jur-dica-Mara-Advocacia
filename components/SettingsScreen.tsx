@@ -32,13 +32,13 @@ const SettingsScreen: React.FC = () => {
 
   const handleTestConnection = async () => {
     setIsTesting(true);
-    setTestResult('Testando chaves...');
+    setTestResult('Verificando pool de chaves...');
     localStorage.removeItem('mara_working_model'); 
     
     try {
       const result = await testConnection();
       if (result.success) {
-        setTestResult(`✅ SUCESSO! ${result.message} (Chave final ...${result.keyUsed})`);
+        setTestResult(`✅ ${result.message}`);
         const wm = localStorage.getItem('mara_working_model');
         if (wm) setWorkingModel(wm);
       } else {
@@ -118,11 +118,11 @@ const SettingsScreen: React.FC = () => {
            )}
 
            <div className="mb-4">
-              <p className="text-xs text-gray-500 mb-2">Variáveis de Ambiente Detectadas:</p>
+              <p className="text-xs text-gray-500 mb-2">Variáveis de Ambiente Detectadas (Verifique se API_KEY_5 aparece):</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {Object.entries(keysMap).map(([name, val], i) => (
-                  <div key={i} className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded font-mono flex justify-between">
-                    <span className="font-bold">{name}</span>
+                  <div key={i} className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded font-mono flex justify-between items-center">
+                    <span className={`font-bold ${name === 'API_KEY_5' ? 'text-emerald-600' : ''}`}>{name}</span>
                     <span className="opacity-70">...{val.slice(-4)}</span>
                   </div>
                 ))}
