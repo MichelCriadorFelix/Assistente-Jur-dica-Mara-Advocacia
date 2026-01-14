@@ -6,7 +6,6 @@ import { getAvailableApiKeys, testConnection } from '../services/geminiService';
 const SettingsScreen: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [sbKey, setSbKey] = useState('');
-  const [modelName, setModelName] = useState('gemini-2.0-flash');
   const [envKeysDetected, setEnvKeysDetected] = useState(0);
   const [isTesting, setIsTesting] = useState(false);
   
@@ -20,16 +19,11 @@ const SettingsScreen: React.FC = () => {
     const sbk = localStorage.getItem('mara_supabase_key');
     if (sbk) setSbKey(sbk);
 
-    const mod = localStorage.getItem('mara_gemini_model');
-    if (mod) setModelName(mod);
-
-    // Verificar chaves do ambiente
     checkEnvKeys();
   }, []);
 
   const checkEnvKeys = () => {
     const keys = getAvailableApiKeys();
-    // Filtra chaves que NÃO são do localStorage para saber se vieram do ambiente
     const local = localStorage.getItem('mara_gemini_api_key');
     const envOnly = keys.filter(k => k !== local);
     setEnvKeysDetected(envOnly.length);
@@ -42,7 +36,7 @@ const SettingsScreen: React.FC = () => {
       if (result.success) {
         alert(`✅ Sucesso! Conectado usando a chave final ...${result.keyUsed}`);
       } else {
-        alert(`❌ Falha: ${result.message}\n\nVerifique se as chaves têm saldo ou se o modelo '${modelName}' está correto.`);
+        alert(`❌ Falha: ${result.message}`);
       }
     } catch (e) {
       alert("Erro ao executar teste.");
@@ -58,14 +52,11 @@ const SettingsScreen: React.FC = () => {
       localStorage.removeItem('mara_gemini_api_key');
     }
     
-    if (modelName.trim()) {
-      localStorage.setItem('mara_gemini_model', modelName.trim());
-    } else {
-      localStorage.setItem('mara_gemini_model', 'gemini-2.0-flash');
-    }
+    // Removemos a configuração manual de modelo para forçar o nativo 2.0/1.5
+    localStorage.removeItem('mara_gemini_model');
 
-    alert('Configurações salvas!');
-    checkEnvKeys(); // Recalcula
+    alert('Configurações salvas! Usando IA Nativa (Gemini 2.0 Flash com Fallback).');
+    checkEnvKeys();
   };
 
   const handleSaveSupabase = () => {
@@ -91,7 +82,6 @@ const SettingsScreen: React.FC = () => {
 
   const isSupabaseActive = !!localStorage.getItem('mara_supabase_key');
 
-  // Variáveis para Diagnóstico
   const varsToDiagnose = [
     { name: "VITE_ux_config", val: (import.meta as any).env?.VITE_ux_config },
     { name: "VITE_APP_PARAM_1", val: (import.meta as any).env?.VITE_APP_PARAM_1 },
@@ -106,7 +96,7 @@ const SettingsScreen: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-start mb-4 gap-4">
             <h2 className="text-xl font-bold dark:text-white flex items-center gap-2">
             <Key className="w-6 h-6 text-emerald-600" /> 
-            Chaves de API (Vercel & Manual)
+            Chaves de API
             </h2>
             <div className="flex gap-2">
               <button 
@@ -128,7 +118,6 @@ const SettingsScreen: React.FC = () => {
             </div>
         </div>
         
-        {/* Environment Status Indicator */}
         <div className={`mb-6 p-4 rounded-lg border flex flex-col gap-3 ${envKeysDetected > 0 ? 'bg-green-50 border-green-200 text-green-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
            <div className="flex items-start gap-3">
              {envKeysDetected > 0 ? <CheckCircle className="w-5 h-5 text-green-600 mt-1" /> : <AlertTriangle className="w-5 h-5 text-amber-500 mt-1" />}
@@ -137,7 +126,6 @@ const SettingsScreen: React.FC = () => {
              </div>
            </div>
 
-           {/* Painel de Diagnóstico */}
            <div className="bg-white/80 p-3 rounded text-xs font-mono space-y-1 mt-2 border border-gray-200">
               <p className="font-bold text-gray-500 mb-2 uppercase tracking-wide">Diagnóstico Vercel:</p>
               {varsToDiagnose.map(v => (
@@ -148,9 +136,9 @@ const SettingsScreen: React.FC = () => {
                   </span>
                 </div>
               ))}
-              <div className="pt-2 text-[10px] text-gray-500 italic flex items-center gap-1">
-                <Info className="w-3 h-3"/>
-                Se o teste de conexão falhar, tente usar 'gemini-1.5-flash' no campo Modelo IA abaixo.
+              <div className="pt-2 text-[10px] text-gray-500 italic flex flex-col gap-1">
+                <p><Info className="w-3 h-3 inline"/> Modelo Nativo: <strong>gemini-2.0-flash</strong> (Fallback: 1.5-flash)</p>
+                <p>As chaves são randomizadas a cada envio para evitar bloqueios.</p>
               </div>
            </div>
         </div>
@@ -158,7 +146,7 @@ const SettingsScreen: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Chave Manual (Teste Rápido)
+              Chave Manual (Opcional - Teste)
             </label>
             <input 
               type="password" 
@@ -167,20 +155,6 @@ const SettingsScreen: React.FC = () => {
               placeholder="Cole aqui se a Vercel não funcionar"
               className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1">
-               <Cpu className="w-3 h-3"/> Modelo IA
-            </label>
-            <input 
-              type="text" 
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              placeholder="Ex: gemini-2.0-flash"
-              className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm font-mono"
-            />
-            <p className="text-[10px] text-gray-500 mt-1">Recomendados: gemini-2.0-flash, gemini-1.5-flash</p>
           </div>
         </div>
 

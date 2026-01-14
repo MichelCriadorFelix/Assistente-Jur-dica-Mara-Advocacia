@@ -1,14 +1,28 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// Helper para pegar o modelo configurado ou usar o padrão
+// Helper para embaralhar chaves (Evita que a chave 1 bloqueie sempre se estiver sem cota)
+const shuffleArray = (array: string[]) => {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+};
+
+// MODELO NATIVO PADRÃO
+// O usuário solicitou "Gemini 2.5". O equivalente técnico atual público é o 2.0 Flash.
+const PRIMARY_MODEL = 'gemini-2.0-flash'; 
+const FALLBACK_MODEL = 'gemini-1.5-flash'; // O "Tanque de Guerra" que assume se o 2.0 falhar
+
 const getModelName = (): string => {
+  // Ignora configuração manual antiga para forçar o que o usuário pediu, 
+  // mas ainda permite override se realmente necessário via localStorage
   if (typeof window !== 'undefined') {
     const local = localStorage.getItem('mara_gemini_model');
     if (local && local.trim().length > 0) return local.trim();
   }
-  // Padrão mais estável atualmente
-  return 'gemini-2.0-flash';
+  return PRIMARY_MODEL;
 };
 
 // Helper para coletar chaves. 
@@ -16,34 +30,26 @@ export const getAvailableApiKeys = (): string[] => {
   const keys: string[] = [];
 
   // Variáveis de Ambiente
-  // O Vite SÓ inclui variáveis que começam com VITE_ no build final.
   const envVars = [
-    // 1. Prioridade Máxima (Exatamente como no seu print da Vercel)
     (import.meta as any).env?.VITE_ux_config,
     (import.meta as any).env?.VITE_APP_PARAM_1,
     (import.meta as any).env?.VITE_APP_PARAM_2,
     (import.meta as any).env?.VITE_APP_PARAM_3,
-
-    // 2. Legado / Outras tentativas
     (import.meta as any).env?.VITE_PUBLIC_DATA_1,
     (import.meta as any).env?.VITE_G_CREDENTIAL,
     (import.meta as any).env?.VITE_API_KEY, 
-    
-    // 3. Fallbacks
     process.env.NEXT_PUBLIC_API_KEY,
     (import.meta as any).env?.API_KEY_1
   ];
 
   envVars.forEach(k => {
-    // Validação básica e LIMPEZA
-    if (k && typeof k === 'string' && k.length > 10 && !k.includes('placeholder')) {
-      // Remove aspas simples ou duplas que o usuário possa ter colado sem querer e espaços
+    if (k && typeof k === 'string' && k.length > 20 && !k.includes('placeholder')) {
       const cleanKey = k.replace(/["']/g, '').trim();
       keys.push(cleanKey);
     }
   });
 
-  // Local Storage (Override manual do usuário pela tela de Configurações)
+  // Local Storage
   if (typeof window !== 'undefined') {
     const localKey = localStorage.getItem('mara_gemini_api_key');
     if (localKey && localKey.trim().length > 0) {
@@ -51,16 +57,10 @@ export const getAvailableApiKeys = (): string[] => {
     }
   }
 
-  // Remove duplicatas e vazios
   const uniqueKeys = [...new Set(keys)].filter(k => !!k);
   
-  if (uniqueKeys.length > 0) {
-    // Console log silencioso para não poluir
-  } else {
-    console.warn("[Mara System] Nenhuma chave encontrada.");
-  }
-
-  return uniqueKeys;
+  // Embaralha para distribuir a carga
+  return shuffleArray(uniqueKeys);
 };
 
 const notifyTeamFunction: FunctionDeclaration = {
@@ -80,7 +80,6 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
-// Helper para simular delay humano
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
@@ -97,11 +96,10 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
       return { success: true, message: "Conexão OK!", keyUsed: apiKey.slice(-4) };
     } catch (e: any) {
       console.warn(`Teste falhou para chave ...${apiKey.slice(-4)}: ${e.message}`);
-      // Continua para a próxima chave
     }
   }
   
-  return { success: false, message: "Todas as chaves falharam no teste." };
+  return { success: false, message: "Todas as chaves falharam." };
 };
 
 export const sendMessageToGemini = async (
@@ -112,19 +110,17 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   const apiKeys = getAvailableApiKeys();
-  const modelName = getModelName();
+  let modelName = getModelName(); // Tenta começar com o 2.0
   
-  // Definição do Tempo de Raciocínio (5 a 10 segundos)
   const minThinkingTime = 5000;
   const maxThinkingTime = 10000;
   const targetThinkingTime = Math.floor(Math.random() * (maxThinkingTime - minThinkingTime + 1) + minThinkingTime);
   const startTime = Date.now();
 
   if (apiKeys.length === 0) {
-    return "⚠️ **Erro de Sincronização**\n\nNenhuma chave de API encontrada. Vá em Configurações para adicionar uma.";
+    return "⚠️ **Erro Crítico**\n\nNenhuma chave de API configurada. O sistema não pode responder.";
   }
 
-  // Preparar o histórico
   const chatHistory: Content[] = history
     .filter(m => m.role !== 'system')
     .map(m => ({
@@ -149,11 +145,12 @@ export const sendMessageToGemini = async (
 
   let lastError = "";
 
-  // Tentar conectar com as chaves disponíveis (Rotação em caso de erro)
+  // LOOP DE ROTAÇÃO DE CHAVES
   for (const apiKey of apiKeys) {
     const isLastKey = apiKeys.indexOf(apiKey) === apiKeys.length - 1;
     const keySuffix = apiKey.slice(-4);
     
+    // TENTATIVA 1: Modelo Principal (2.0)
     try {
       const ai = new GoogleGenAI({ apiKey });
       const chat = ai.chats.create({
@@ -163,20 +160,20 @@ export const sendMessageToGemini = async (
       });
 
       const result = await chat.sendMessage({ message: currentParts });
+      
+      // Se chegou aqui, funcionou. Processa resposta.
       let finalResponseText = result.text || "";
 
-      // Checa chamadas de função (Tools)
       if (result.functionCalls && result.functionCalls.length > 0) {
         const call = result.functionCalls[0];
         if (onToolCall) onToolCall({ name: call.name, args: call.args });
-        
         const finalResult = await chat.sendMessage({
           message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
         });
         finalResponseText = finalResult.text || "";
       }
 
-      // === SIMULAÇÃO DE RACIOCÍNIO HUMANO ===
+      // Delay Humano
       const elapsedTime = Date.now() - startTime;
       if (elapsedTime < targetThinkingTime) {
         await sleep(targetThinkingTime - elapsedTime);
@@ -185,37 +182,46 @@ export const sendMessageToGemini = async (
       return finalResponseText;
 
     } catch (error: any) {
-      const msg = error.message || '';
+      const msg = error.message || JSON.stringify(error);
       lastError = msg;
-      console.warn(`[Mara Rotation] Chave ...${keySuffix} falhou. Motivo:`, msg);
+      
+      console.warn(`[Mara] Falha no modelo ${modelName} com chave ...${keySuffix}. Erro: ${msg}`);
 
-      // LÓGICA DE ROTAÇÃO OTIMIZADA
-      const isRetryable = msg.includes('429') || 
-                          msg.includes('503') || 
-                          msg.includes('RESOURCE_EXHAUSTED') || 
-                          msg.includes('Overloaded');
+      // LÓGICA DE FALLBACK INTELIGENTE
+      // Se o erro for COTA (429) ou SOBRECARGA (503) e estávamos usando o modelo 2.0,
+      // tentamos IMEDIATAMENTE o modelo 1.5 (mais estável) com a MESMA chave.
+      const isQuotaError = msg.includes('429') || msg.includes('Quota') || msg.includes('RESOURCE_EXHAUSTED');
+      
+      if (isQuotaError && modelName === PRIMARY_MODEL) {
+          console.log(`[Mara Fallback] Cota excedida no 2.0. Tentando fallback para ${FALLBACK_MODEL}...`);
+          try {
+             const aiFallback = new GoogleGenAI({ apiKey });
+             const chatFallback = aiFallback.chats.create({
+                model: FALLBACK_MODEL,
+                config: { systemInstruction, tools },
+                history: chatHistory
+             });
+             const resultFallback = await chatFallback.sendMessage({ message: currentParts });
+             
+             // Sucesso no Fallback!
+             const elapsedTime = Date.now() - startTime;
+             if (elapsedTime < targetThinkingTime) await sleep(targetThinkingTime - elapsedTime);
+             return resultFallback.text || "";
 
-      const isAuthError = msg.includes('403') || 
-                          msg.includes('PERMISSION_DENIED') || 
-                          msg.includes('key not valid') ||
-                          msg.includes('API_KEY_INVALID');
+          } catch (fallbackError: any) {
+             console.warn(`[Mara Fallback] Falhou também no 1.5. Chave ...${keySuffix} está morta.`);
+             // Se falhou no fallback, continua o loop para a PRÓXIMA chave
+          }
+      }
 
-      // Se for um erro recuperável e não for a última chave, tenta a próxima
-      if ((isRetryable || isAuthError) && !isLastKey) {
-          console.log(`🔄 Rotação: Chave ...${keySuffix} falhou. Tentando próxima...`);
+      // Se não foi possível recuperar com fallback, tenta a próxima chave da lista
+      if (!isLastKey) {
+          console.log(`🔄 Rotação: Tentando próxima chave API...`);
           continue; 
       }
     }
   }
 
-  // Se chegou aqui, todas falharam. Retorna mensagem amigável com erro técnico.
-  if (lastError.includes('429') || lastError.includes('RESOURCE_EXHAUSTED')) {
-      return `⏳ **Sistema Sobrecarregado**\n\nA IA atingiu o limite de requisições gratuitas do Google.\n\n*Erro Técnico: ${lastError.slice(0, 100)}...*`;
-  }
-  
-  if (lastError.includes('403') || lastError.includes('API_KEY')) {
-      return `🚫 **Chave Inválida**\n\nO Google rejeitou a chave de acesso. Verifique as configurações.\n\n*Erro Técnico: ${lastError.slice(0, 100)}...*`;
-  }
-
-  return `⚠️ **Erro de Conexão**\n\nNão foi possível contatar a IA.\n\n*Erro Técnico: ${lastError.slice(0, 150)}*`;
+  // Se tudo falhar
+  return `⚠️ **Sistema Indisponível**\n\nTodas as chaves de API atingiram o limite ou estão inválidas.\n\nDetalhe Técnico: ${lastError.slice(0, 100)}`;
 };
