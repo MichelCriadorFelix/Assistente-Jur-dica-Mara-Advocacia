@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, RefreshCw, Copy, Info } from 'lucide-react';
+import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, RefreshCw, Copy, Info, ExternalLink } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys } from '../services/geminiService';
 
@@ -86,10 +86,20 @@ const SettingsScreen: React.FC = () => {
       
       {/* SECTION 1: AI SETTINGS */}
       <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border-l-4 border-emerald-500">
-        <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
-          <Key className="w-6 h-6 text-emerald-600" /> 
-          Chaves de API (Vercel & Manual)
-        </h2>
+        <div className="flex justify-between items-start mb-4">
+            <h2 className="text-xl font-bold dark:text-white flex items-center gap-2">
+            <Key className="w-6 h-6 text-emerald-600" /> 
+            Chaves de API (Vercel & Manual)
+            </h2>
+            <a 
+              href="https://aistudio.google.com/app/apikey" 
+              target="_blank" 
+              rel="noreferrer"
+              className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1 transition"
+            >
+              Gerenciar Chaves Google <ExternalLink className="w-3 h-3"/>
+            </a>
+        </div>
         
         {/* Environment Status Indicator */}
         <div className={`mb-6 p-4 rounded-lg border flex flex-col gap-3 ${envKeysDetected > 0 ? 'bg-green-50 border-green-200 text-green-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
@@ -111,8 +121,9 @@ const SettingsScreen: React.FC = () => {
                   </span>
                 </div>
               ))}
-              <div className="pt-2 text-[10px] text-gray-500 italic">
-                * Se aparecer "DETECTADO" mas não funcionar, verifique se a chave no Google AI Studio está válida.
+              <div className="pt-2 text-[10px] text-gray-500 italic flex items-center gap-1">
+                <Info className="w-3 h-3"/>
+                Se uma chave estiver marcada como "Aviso" no Google, a rotação automática irá ignorá-la.
               </div>
            </div>
         </div>
@@ -120,7 +131,7 @@ const SettingsScreen: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Chave Manual (Opcional)
+              Chave Manual (Teste Rápido)
             </label>
             <input 
               type="password" 

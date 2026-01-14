@@ -159,7 +159,7 @@ export const sendMessageToGemini = async (
       }
 
       // === SIMULAÇÃO DE RACIOCÍNIO HUMANO ===
-      // Se a IA respondeu muito rápido (ex: 1s), esperamos até completar o targetThinkingTime (ex: 5s).
+      // Se a IA respondeu muito rápido, esperamos até completar o tempo mínimo.
       const elapsedTime = Date.now() - startTime;
       if (elapsedTime < targetThinkingTime) {
         await sleep(targetThinkingTime - elapsedTime);
@@ -172,8 +172,6 @@ export const sendMessageToGemini = async (
       console.warn(`[Mara Rotation] Chave ...${apiKey.slice(-4)} falhou. Motivo:`, msg);
 
       // LÓGICA DE ROTAÇÃO OTIMIZADA
-      // Se o erro for de Cota (429), Sobrecarga (503) ou Permissão (403), 
-      // e NÃO for a última chave, pula imediatamente para a próxima.
       const isRetryable = msg.includes('429') || 
                           msg.includes('503') || 
                           msg.includes('RESOURCE_EXHAUSTED') || 
@@ -181,22 +179,24 @@ export const sendMessageToGemini = async (
 
       const isAuthError = msg.includes('403') || 
                           msg.includes('PERMISSION_DENIED') || 
-                          msg.includes('key not valid');
+                          msg.includes('key not valid') ||
+                          msg.includes('API_KEY_INVALID'); // Google envia isso para chaves revogadas
 
+      // Se for um erro que vale a pena tentar outra chave, e NÃO for a última chave
       if ((isRetryable || isAuthError) && !isLastKey) {
-          console.log(`🔄 Rotação Ativada: Trocando da chave ${apiKeys.indexOf(apiKey) + 1} para a próxima...`);
-          continue; // Pula para a próxima iteração do loop (próxima chave)
+          console.log(`🔄 Rotação Ativada: A chave ...${apiKey.slice(-4)} está inválida ou sobrecarregada. Tentando próxima...`);
+          continue; // Pula para a próxima iteração do loop
       }
 
       // Se for a última chave e falhou todas
       if (isLastKey) {
          if (isAuthError) {
-             return "🚫 **Acesso Negado (Google)**\n\nA chave foi encontrada, mas o Google a rejeitou. Verifique se copiou a chave correta do AI Studio.";
+             return "🚫 **Problema com a Chave API**\n\nO Google bloqueou o acesso. Isso acontece se a chave foi exposta publicamente ou deletada. Por favor, gere uma nova chave no AI Studio e atualize as configurações.";
          }
          if (isRetryable) return "⏳ A IA está com alto volume de acessos no momento. Aguarde alguns segundos e tente novamente.";
          return "⚠️ **Erro Técnico:** " + msg;
       }
-      // Se for outro erro desconhecido, tenta a próxima também por segurança
+      
       continue;
     }
   }
