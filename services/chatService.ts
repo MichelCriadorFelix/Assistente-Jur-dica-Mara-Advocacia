@@ -40,7 +40,8 @@ const mapDbContact = (row: any): Contact => ({
   avatar: row.avatar,
   unreadCount: row.unread_count,
   status: row.status as any,
-  caseStatus: row.case_status || '' // Mapeia o campo do banco
+  caseStatus: row.case_status || '',
+  aiPaused: row.ai_paused || false // Mapeia o novo campo
 });
 
 export const chatService = {
@@ -62,7 +63,8 @@ export const chatService = {
         avatar: `https://ui-avatars.com/api/?name=Cliente+${Math.floor(Math.random() * 100)}&background=random`,
         unreadCount: 0,
         status: 'new',
-        caseStatus: ''
+        caseStatus: '',
+        aiPaused: false
       };
       
       db.contacts.unshift(newContact);
@@ -179,7 +181,6 @@ export const chatService = {
      await supabase.from('contacts').update(updateData).eq('id', contactId);
   },
 
-  // NOVA FUNÇÃO: Salvar Anotações do Processo
   updateCaseStatus: async (contactId: string, notes: string) => {
     if (!isSupabaseConfigured || contactId.startsWith('local-')) {
        const db = getLocalDB();
@@ -190,8 +191,21 @@ export const chatService = {
        }
        return;
     }
-    // No Supabase, requer coluna 'case_status' na tabela contacts
     await supabase.from('contacts').update({ case_status: notes }).eq('id', contactId);
+  },
+
+  // NOVO: Alternar se a IA responde ou não
+  toggleAiStatus: async (contactId: string, paused: boolean) => {
+    if (!isSupabaseConfigured || contactId.startsWith('local-')) {
+       const db = getLocalDB();
+       const contact = db.contacts.find(c => c.id === contactId);
+       if (contact) {
+         contact.aiPaused = paused;
+         saveLocalDB(db);
+       }
+       return;
+    }
+    await supabase.from('contacts').update({ ai_paused: paused }).eq('id', contactId);
   },
 
   getAllContacts: async (): Promise<Contact[]> => {
@@ -208,8 +222,7 @@ export const chatService = {
   },
 
   getDashboardStats: async () => {
-    // ... (Mantido igual)
-    const contacts = await chatService.getAllContacts(); // Reuso simples
+    const contacts = await chatService.getAllContacts(); 
     return {
       total: contacts.length,
       triaged: contacts.filter(c => c.status === 'triaged').length,

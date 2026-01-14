@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Message, Contact, AppConfig } from '../types';
-import { Search, Bot, User, RefreshCw, Save, Filter, FileText, Check } from 'lucide-react';
+import { Search, Bot, User, RefreshCw, Save, Filter, FileText, Check, Send, AlertTriangle, PlayCircle, PauseCircle } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 
@@ -20,20 +20,36 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
   const [showPromptEdit, setShowPromptEdit] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // Estados de Interação Humana
+  const [staffInput, setStaffInput] = useState('');
+  const [isSendingStaff, setIsSendingStaff] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   // Estado do Prontuário (Case Status)
   const [caseStatusText, setCaseStatusText] = useState('');
   const [isSavingStatus, setIsSavingStatus] = useState(false);
 
   const fetchContacts = async () => {
-    setLoading(true);
+    // Silent update to not disrupt UI if user is typing
     const data = await chatService.getAllContacts();
     setContacts(data);
-    setLoading(false);
+    
+    // Se o contato selecionado mudou (ex: IA pausada), atualiza o estado local
+    if (selectedContact) {
+       const updated = data.find(c => c.id === selectedContact.id);
+       if (updated && updated.aiPaused !== selectedContact.aiPaused) {
+         setSelectedContact(prev => prev ? { ...prev, aiPaused: updated.aiPaused } : null);
+       }
+    }
   };
 
   useEffect(() => {
-    fetchContacts();
-    const interval = setInterval(fetchContacts, 10000);
+    setLoading(true);
+    chatService.getAllContacts().then((data) => {
+      setContacts(data);
+      setLoading(false);
+    });
+    const interval = setInterval(fetchContacts, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -44,10 +60,26 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
   // Load messages and status when contact is selected
   useEffect(() => {
     if (selectedContact) {
-      chatService.loadMessages(selectedContact.id).then(setMessages);
+      chatService.loadMessages(selectedContact.id).then(msgs => {
+        setMessages(msgs);
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      });
       setCaseStatusText(selectedContact.caseStatus || '');
     }
   }, [selectedContact]);
+
+  // Polling messages for selected contact
+  useEffect(() => {
+    if (!selectedContact) return;
+    const interval = setInterval(async () => {
+       const newMsgs = await chatService.loadMessages(selectedContact.id);
+       if (newMsgs.length > messages.length) {
+         setMessages(newMsgs);
+         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+       }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [selectedContact, messages]);
 
   const handleSavePrompt = () => {
     onUpdateConfig({ ...config, systemPrompt: promptEditable });
@@ -59,10 +91,44 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
     if (!selectedContact) return;
     setIsSavingStatus(true);
     await chatService.updateCaseStatus(selectedContact.id, caseStatusText);
-    
-    // Atualiza lista localmente para refletir a mudança
     setContacts(prev => prev.map(c => c.id === selectedContact.id ? { ...c, caseStatus: caseStatusText } : c));
     setIsSavingStatus(false);
+  };
+
+  const handleToggleAi = async () => {
+    if (!selectedContact) return;
+    const newState = !selectedContact.aiPaused;
+    
+    // Otimista
+    setSelectedContact({ ...selectedContact, aiPaused: newState });
+    
+    await chatService.toggleAiStatus(selectedContact.id, newState);
+    // Refresh list
+    fetchContacts();
+  };
+
+  const handleSendStaffMessage = async () => {
+    if (!selectedContact || !staffInput.trim()) return;
+    
+    setIsSendingStaff(true);
+    const msg: Partial<Message> = {
+      role: 'model', // Enviamos como model para o cliente ver como resposta do escritório
+      content: staffInput,
+      type: 'text'
+    };
+
+    // Ao enviar msg manual, é boa prática pausar a IA automaticamente se já não estiver
+    if (!selectedContact.aiPaused) {
+      await chatService.toggleAiStatus(selectedContact.id, true);
+      setSelectedContact({ ...selectedContact, aiPaused: true });
+    }
+
+    await chatService.saveMessage(selectedContact.id, msg);
+    
+    setMessages(prev => [...prev, { ...msg, id: Date.now().toString(), timestamp: new Date() } as Message]);
+    setStaffInput('');
+    setIsSendingStaff(false);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const filteredContacts = contacts.filter(contact => {
@@ -87,7 +153,7 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                 className="w-full pl-9 pr-4 py-2 text-sm rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-whatsapp-green outline-none" 
               />
             </div>
-            <button onClick={fetchContacts} className="p-2 text-gray-500 hover:text-emerald-600" title="Atualizar">
+            <button onClick={() => fetchContacts()} className="p-2 text-gray-500 hover:text-emerald-600" title="Atualizar">
                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -129,14 +195,17 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                  <div className="relative">
                    <img src={contact.avatar} alt={contact.name} className="w-12 h-12 rounded-full object-cover" />
                    {contact.status === 'urgent' && <span className="absolute bottom-0 right-0 w-3 h-3 bg-red-500 border-2 border-white rounded-full"></span>}
-                   {contact.caseStatus && <span className="absolute top-0 right-0 w-3 h-3 bg-yellow-400 border-2 border-white rounded-full" title="Possui status atualizado"></span>}
+                   {contact.aiPaused && <span className="absolute top-0 left-0 w-3 h-3 bg-blue-500 border-2 border-white rounded-full animate-pulse" title="Intervenção Humana Ativa"></span>}
                  </div>
                  <div className="flex-1 min-w-0">
                    <div className="flex justify-between items-center mb-1">
                      <h4 className="font-semibold text-gray-900 dark:text-gray-100 truncate">{contact.name}</h4>
                      <span className="text-xs text-gray-500">{contact.time}</span>
                    </div>
-                   <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{contact.lastMessage}</p>
+                   <p className="text-sm text-gray-500 dark:text-gray-400 truncate flex items-center gap-1">
+                     {contact.aiPaused && <User className="w-3 h-3 text-blue-500" />}
+                     {contact.lastMessage}
+                   </p>
                  </div>
                </div>
              ))
@@ -150,50 +219,120 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
           <>
             <div className="h-16 bg-white dark:bg-gray-800 border-b dark:border-gray-700 flex justify-between items-center px-6 shadow-sm z-10">
               <div className="flex items-center gap-3">
-                 <div className="font-semibold text-lg dark:text-white">
-                   {showPromptEdit ? 'Configurar IA' : selectedContact?.name}
+                 <div className="flex flex-col">
+                   <div className="font-semibold text-lg dark:text-white flex items-center gap-2">
+                     {showPromptEdit ? 'Configurar IA' : selectedContact?.name}
+                     {selectedContact?.aiPaused && !showPromptEdit && (
+                       <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded border border-blue-200 flex items-center gap-1">
+                         <User className="w-3 h-3" /> Humano Assumiu
+                       </span>
+                     )}
+                   </div>
+                   {selectedContact?.caseStatus && !showPromptEdit && (
+                     <span className="text-xs text-yellow-600 flex items-center gap-1">
+                       <FileText className="w-3 h-3" /> Info Processual Ativa
+                     </span>
+                   )}
                  </div>
-                 {selectedContact?.caseStatus && !showPromptEdit && (
-                   <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded border border-yellow-200 flex items-center gap-1">
-                     <FileText className="w-3 h-3" /> Info Processual Ativa
-                   </span>
-                 )}
               </div>
-              <div className="flex gap-2">
-                 <button onClick={() => setShowPromptEdit(!showPromptEdit)} className={`p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${showPromptEdit ? 'text-emerald-600 bg-emerald-50' : 'text-gray-500'}`} title="Configurar Prompt">
-                   <Bot className="w-5 h-5" />
-                 </button>
-              </div>
+              
+              {!showPromptEdit && (
+                <div className="flex gap-3">
+                   <button 
+                     onClick={handleToggleAi} 
+                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                       selectedContact?.aiPaused 
+                         ? 'bg-green-100 text-green-700 border border-green-200 hover:bg-green-200' 
+                         : 'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200'
+                     }`}
+                   >
+                     {selectedContact?.aiPaused ? (
+                       <><PlayCircle className="w-4 h-4" /> Devolver para IA</>
+                     ) : (
+                       <><PauseCircle className="w-4 h-4" /> Assumir Conversa</>
+                     )}
+                   </button>
+                   
+                   <button onClick={() => setShowPromptEdit(true)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="Configurar Prompt">
+                     <Bot className="w-5 h-5" />
+                   </button>
+                </div>
+              )}
             </div>
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Chat History */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                   {showPromptEdit ? (
-                      <div className="max-w-3xl mx-auto bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
-                          <h3 className="text-lg font-medium mb-4 dark:text-white">Prompt do Sistema</h3>
-                          <textarea 
-                            className="w-full h-96 p-4 text-sm border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-200 resize-none"
-                            value={promptEditable}
-                            onChange={(e) => setPromptEditable(e.target.value)}
-                          />
-                          <button onClick={handleSavePrompt} className="mt-4 bg-emerald-600 text-white px-6 py-2 rounded-lg text-sm font-medium float-right">Salvar</button>
-                      </div>
-                   ) : messages.length > 0 ? (
-                        messages.map(msg => (
-                          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
-                             <div className={`flex items-start max-w-xl gap-2 ${msg.role === 'user' ? 'flex-row' : 'flex-row-reverse'}`}>
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-gray-300' : 'bg-emerald-600'}`}>
-                                   {msg.role === 'user' ? <User className="w-5 h-5 text-gray-600" /> : <Bot className="w-5 h-5 text-white" />}
+                <div className="flex-1 flex flex-col relative">
+                   <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                     {showPromptEdit ? (
+                        <div className="max-w-3xl mx-auto bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
+                            <h3 className="text-lg font-medium mb-4 dark:text-white">Prompt do Sistema</h3>
+                            <textarea 
+                              className="w-full h-96 p-4 text-sm border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-200 resize-none"
+                              value={promptEditable}
+                              onChange={(e) => setPromptEditable(e.target.value)}
+                            />
+                            <div className="mt-4 flex justify-end gap-2">
+                              <button onClick={() => setShowPromptEdit(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancelar</button>
+                              <button onClick={handleSavePrompt} className="bg-emerald-600 text-white px-6 py-2 rounded-lg text-sm font-medium">Salvar</button>
+                            </div>
+                        </div>
+                     ) : messages.length > 0 ? (
+                          messages.map(msg => (
+                            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+                              <div className={`flex items-start max-w-xl gap-2 ${msg.role === 'user' ? 'flex-row' : 'flex-row-reverse'}`}>
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-gray-300' : 'bg-emerald-600'}`}>
+                                    {msg.role === 'user' ? <User className="w-5 h-5 text-gray-600" /> : <Bot className="w-5 h-5 text-white" />}
+                                  </div>
+                                  <div className={`p-3 rounded-lg shadow-sm text-sm ${msg.role === 'user' ? 'bg-white dark:bg-gray-800 border' : 'bg-emerald-600 text-white'}`}>
+                                    {msg.content}
+                                  </div>
+                              </div>
+                            </div>
+                          ))
+                     ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-gray-400"><p>Sem mensagens.</p></div>
+                     )}
+                     <div ref={messagesEndRef} />
+                   </div>
+
+                   {/* Staff Input Area */}
+                   {!showPromptEdit && (
+                     <div className="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700">
+                        {selectedContact?.aiPaused ? (
+                           <div className="flex gap-2 items-center">
+                              <div className="flex-1 relative">
+                                <input
+                                  type="text"
+                                  value={staffInput}
+                                  onChange={(e) => setStaffInput(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleSendStaffMessage()}
+                                  placeholder="Digite uma resposta como funcionário..."
+                                  className="w-full p-3 pr-10 border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                                <div className="absolute right-3 top-3 text-blue-500 animate-pulse" title="Você está no controle">
+                                  <User className="w-4 h-4" />
                                 </div>
-                                <div className={`p-3 rounded-lg shadow-sm text-sm ${msg.role === 'user' ? 'bg-white dark:bg-gray-800' : 'bg-emerald-600 text-white'}`}>
-                                   {msg.content}
-                                </div>
-                             </div>
-                          </div>
-                        ))
-                   ) : (
-                      <div className="h-full flex flex-col items-center justify-center text-gray-400"><p>Sem mensagens.</p></div>
+                              </div>
+                              <button 
+                                onClick={handleSendStaffMessage}
+                                disabled={isSendingStaff || !staffInput.trim()}
+                                className="p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+                              >
+                                <Send className="w-5 h-5" />
+                              </button>
+                           </div>
+                        ) : (
+                           <div className="flex items-center justify-between bg-emerald-50 text-emerald-800 p-3 rounded-lg border border-emerald-100">
+                              <span className="flex items-center gap-2 text-sm font-medium">
+                                <Bot className="w-4 h-4" /> A IA está respondendo automaticamente.
+                              </span>
+                              <button onClick={handleToggleAi} className="text-xs bg-white border border-emerald-200 px-3 py-1 rounded hover:bg-emerald-100 font-semibold text-emerald-700">
+                                Assumir Controle
+                              </button>
+                           </div>
+                        )}
+                     </div>
                    )}
                 </div>
 

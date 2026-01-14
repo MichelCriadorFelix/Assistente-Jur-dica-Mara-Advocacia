@@ -15,7 +15,8 @@ export interface Contact {
   avatar: string;
   unreadCount: number;
   status: 'new' | 'triaged' | 'urgent';
-  caseStatus?: string; // NOVO: Informações sobre andamento processual (visível apenas para Adm/IA)
+  caseStatus?: string; // Informações sobre andamento processual
+  aiPaused?: boolean; // NOVO: Se true, a IA não responde automaticamente (Intervenção Humana)
 }
 
 export interface TeamMember {

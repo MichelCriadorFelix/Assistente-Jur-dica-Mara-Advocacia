@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2 } from 'lucide-react';
+import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2, Trash2 } from 'lucide-react';
 import AudioRecorder from './AudioRecorder';
 import { Message, AppConfig, Contact } from '../types';
 import { sendMessageToGemini } from '../services/geminiService';
@@ -15,7 +15,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [contactId, setContactId] = useState<string | null>(null);
-  const [contactDetails, setContactDetails] = useState<Contact | null>(null); // Armazena dados incluindo o prontuário
+  const [contactDetails, setContactDetails] = useState<Contact | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Inicialização da Sessão
@@ -27,7 +29,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         setContactId(id);
         localStorage.setItem('mara_contact_id', id);
 
-        // Carrega detalhes (Prontuário/Status)
         const details = await chatService.getContactDetails(id);
         setContactDetails(details);
 
@@ -35,7 +36,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Mensagem de Boas-vindas "Aberta" (Humanizada)
            const initialMsg: Message = {
              id: 'init-welcome', 
              role: 'model', 
@@ -50,12 +50,36 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       }
     };
     initSession();
+
+    // Polling para checar se advogado respondeu
+    const interval = setInterval(async () => {
+      const storedId = localStorage.getItem('mara_contact_id');
+      if (storedId) {
+        const history = await chatService.loadMessages(storedId);
+        setMessages(prev => {
+          if (history.length > prev.length) return history;
+          return prev;
+        });
+        // Atualiza status (para ver se a IA foi pausada)
+        const det = await chatService.getContactDetails(storedId);
+        setContactDetails(det);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, []);
 
-  // Auto-scroll sempre que mensagens mudam
+  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  const handleResetConversation = () => {
+    if (confirm("Deseja apagar tudo e reiniciar o teste do zero?")) {
+      localStorage.removeItem('mara_contact_id');
+      window.location.reload();
+    }
+  };
 
   const handleSendMessage = async (text?: string, audioBlob?: Blob) => {
     if ((!text && !audioBlob) || !contactId || isLoading) return;
@@ -70,18 +94,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       audioUrl: audioBlob ? URL.createObjectURL(audioBlob) : undefined
     };
 
-    // 2. Atualiza UI imediatamente (Optimistic)
+    // 2. Atualiza UI e salva msg
     const previousHistory = [...messages]; 
     setMessages(prev => [...prev, userMsg]);
-    
     setInputText('');
     setIsLoading(true);
 
     try {
-      // 3. Persiste mensagem do usuário no serviço
       await chatService.saveMessage(contactId, userMsg);
 
-      // 4. Prepara áudio se houver
+      // 3. Verifica se a IA está PAUSADA (Intervenção Humana)
+      // Recarrega detalhes para ter certeza absoluta do estado atual
+      const freshDetails = await chatService.getContactDetails(contactId);
+      setContactDetails(freshDetails);
+
+      if (freshDetails?.aiPaused) {
+        setIsLoading(false);
+        return; // PARE AQUI. Não chame o Gemini.
+      }
+
+      // 4. Se não pausada, segue fluxo normal da IA
       let audioBase64: string | undefined;
       if (audioBlob) {
         audioBase64 = await new Promise((resolve) => {
@@ -94,12 +126,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         });
       }
 
-      // 5. Envia para IA (Passando o Status do Caso como contexto extra)
       const historyForAI = previousHistory.filter(m => m.id !== 'init-welcome');
-
-      // Tenta recarregar detalhes para garantir que temos o status mais recente
-      const latestDetails = await chatService.getContactDetails(contactId);
-      const caseStatus = latestDetails?.caseStatus || "";
+      const caseStatus = freshDetails?.caseStatus || "";
 
       const responseText = await sendMessageToGemini(
         historyForAI, 
@@ -110,10 +138,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
              await chatService.updateContactStatus(contactId, 'triaged', toolCall.args.clientName);
           }
         },
-        caseStatus // INJETANDO O PRONTUÁRIO
+        caseStatus
       );
 
-      // 6. Processa resposta da IA
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'model',
@@ -148,7 +175,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       </div>
 
       {/* Header */}
-      <div className="bg-[#00a884] p-3 flex items-center justify-between shadow-md z-10 text-white">
+      <div className="bg-[#00a884] p-3 flex items-center justify-between shadow-md z-10 text-white relative">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="p-1 hover:bg-white/20 rounded-full transition-colors">
             <ArrowLeft className="w-6 h-6" />
@@ -160,14 +187,28 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           <div className="flex flex-col">
             <h1 className="font-semibold text-base leading-tight">Mara (IA Jurídica)</h1>
             <span className="text-xs text-white/90 font-medium">
-              {isLoading ? 'Digitando...' : 'Online'}
+              {contactDetails?.aiPaused ? '🔴 Atendimento Humano' : (isLoading ? 'Digitando...' : 'Online')}
             </span>
           </div>
         </div>
-        <div className="flex gap-4 pr-2 opacity-80">
+        <div className="flex gap-4 pr-2 opacity-80 relative">
           <Video className="w-5 h-5 cursor-not-allowed" />
           <Phone className="w-5 h-5 cursor-not-allowed" />
-          <MoreVertical className="w-5 h-5 cursor-pointer" />
+          <button onClick={() => setShowMenu(!showMenu)}>
+            <MoreVertical className="w-5 h-5 cursor-pointer" />
+          </button>
+          
+          {/* Dropdown Menu */}
+          {showMenu && (
+            <div className="absolute right-0 top-10 bg-white rounded-lg shadow-xl py-2 w-48 z-50 animate-in fade-in slide-in-from-top-2">
+              <button 
+                onClick={handleResetConversation}
+                className="w-full text-left px-4 py-3 hover:bg-gray-100 text-red-600 flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" /> Resetar Teste
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -199,7 +240,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           );
         })}
         
-        {/* Indicador de Digitação (Bubble) */}
         {isLoading && (
           <div className="flex justify-start animate-pulse">
              <div className="bg-white rounded-lg p-3 shadow-sm rounded-tl-none flex gap-1 items-center">
