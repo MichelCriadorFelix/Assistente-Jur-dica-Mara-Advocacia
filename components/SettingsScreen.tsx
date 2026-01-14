@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Key, Activity, CheckCircle, RotateCcw } from 'lucide-react';
+import { Database, Key, Activity, CheckCircle, RotateCcw, AlertTriangle } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys, testConnection } from '../services/geminiService';
 
@@ -58,7 +58,7 @@ const SettingsScreen: React.FC = () => {
   const handleResetModel = () => {
     localStorage.removeItem('mara_working_model');
     setWorkingModel('');
-    alert('Modelo preferido resetado. O sistema buscará o melhor modelo (Gemini 2.0) na próxima mensagem.');
+    alert('Modelo preferido resetado. O sistema buscará o melhor modelo (Gemini 1.5) na próxima mensagem.');
   };
 
   const handleSaveApi = () => {
@@ -128,6 +128,15 @@ const SettingsScreen: React.FC = () => {
               ))}
            </div>
            
+           {/* ALERTA DE REDEPLOY */}
+           <div className="flex items-start gap-2 bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded border border-yellow-200 dark:border-yellow-700 mb-4 text-sm text-yellow-800 dark:text-yellow-200">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <p>
+                <strong>Adicionou chaves novas na Vercel?</strong><br/>
+                Elas só aparecerão aqui após fazer um <strong>Redeploy</strong> (reconstrução) do site no painel da Vercel. Variáveis de ambiente são injetadas apenas durante o build.
+              </p>
+           </div>
+           
            {workingModel && (
              <div className="flex items-center justify-between text-xs text-emerald-700 bg-emerald-50 p-2 rounded border border-emerald-100">
                <div className="flex items-center gap-2">
@@ -143,12 +152,12 @@ const SettingsScreen: React.FC = () => {
         
         <div className="flex gap-4 items-end opacity-50 hover:opacity-100 transition-opacity">
            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Adicionar Chave Extra (Manual)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Adicionar Chave Extra (Manual / Emergência)</label>
               <input 
                 type="password" 
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Ex: AIzaSy..."
+                placeholder="Ex: AIzaSy... (Usa esta chave imediatamente)"
                 className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
               />
            </div>

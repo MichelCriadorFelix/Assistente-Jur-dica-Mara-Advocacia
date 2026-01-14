@@ -1,12 +1,12 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// LISTA DE MODELOS (ORDEM DE PRIORIDADE ALTERADA PARA ESTABILIDADE)
+// LISTA DE MODELOS (ORDEM DE PRIORIDADE PARA ESTABILIDADE)
 const MODEL_CANDIDATES = [
-  'gemini-1.5-flash',          // PRINCIPAL: Mais rápido, estável e gratuito
-  'gemini-1.5-flash-latest',   // Fallback seguro
-  'gemini-2.0-flash-exp',      // Experimental (Pode dar erro 404/403 dependendo da conta)
-  'gemini-1.5-pro',            // Mais inteligente, mas com rate limit menor
+  'gemini-1.5-flash',          // PRIORIDADE 1: Tier Gratuito Ilimitado (High Rate Limit)
+  'gemini-1.5-flash-latest',   // Fallback
+  'gemini-2.0-flash-exp',      // Experimental (Pode ser instável)
+  'gemini-1.5-pro',            // Backup Pro
 ];
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -14,6 +14,16 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const cleanKey = (key: string | undefined): string => {
   if (!key) return '';
   return key.replace(/["'\s\n\r]/g, '').trim();
+};
+
+// Algoritmo de Fisher-Yates para embaralhar as chaves (Load Balancing)
+const shuffleArray = (array: string[]) => {
+  const newArr = [...array];
+  for (let i = newArr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+  }
+  return newArr;
 };
 
 export const getAvailableApiKeys = (): string[] => {
@@ -41,6 +51,7 @@ export const getAvailableApiKeys = (): string[] => {
     .map(k => cleanKey(k))
     .filter(k => k && k.length > 20 && k.startsWith('AIza'));
 
+  // Retorna chaves únicas
   return [...new Set(validKeys)];
 };
 
@@ -65,6 +76,7 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
   const keys = getAvailableApiKeys();
   if (keys.length === 0) return { success: false, message: "Nenhuma chave AIza encontrada." };
 
+  // No teste, não embaralhamos para testar consistência, ou podemos testar todas
   let lastDetailedError = "";
 
   for (const apiKey of keys) {
@@ -84,17 +96,15 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
           keyUsed: apiKey.slice(-4) 
         };
       } catch (e: any) {
-        console.error(`Falha ao testar chave ...${apiKey.slice(-4)} no modelo ${modelName}:`, e);
-        // Captura o erro real do Google para mostrar ao usuário se tudo falhar
+        console.warn(`[Teste] Falha chave ...${apiKey.slice(-4)} modelo ${modelName}`, e.message);
         lastDetailedError = e.message || JSON.stringify(e);
       }
     }
   }
 
-  // Se chegou aqui, nada funcionou. Retorna o erro real.
   return { 
     success: false, 
-    message: `Falha Google: ${lastDetailedError.slice(0, 150)}...` 
+    message: `Falha Geral: ${lastDetailedError.slice(0, 150)}...` 
   };
 };
 
@@ -105,13 +115,14 @@ export const sendMessageToGemini = async (
   onToolCall?: (toolCall: any) => void
 ): Promise<string> => {
   
-  const apiKeys = getAvailableApiKeys();
+  let apiKeys = getAvailableApiKeys();
   if (apiKeys.length === 0) return "⚠️ **Erro**: Nenhuma chave API encontrada.";
+
+  // LOAD BALANCING: Embaralha as chaves para não bater sempre na primeira (que pode estar sem cota)
+  apiKeys = shuffleArray(apiKeys);
 
   const savedModel = localStorage.getItem('mara_working_model');
   const preferredModel = savedModel && MODEL_CANDIDATES.includes(savedModel) ? savedModel : MODEL_CANDIDATES[0];
-  
-  // Lista de tentativas: Preferido -> Flash -> Resto
   const modelsToTry = [preferredModel, ...MODEL_CANDIDATES.filter(m => m !== preferredModel)];
 
   const chatHistory: Content[] = history
@@ -134,9 +145,12 @@ export const sendMessageToGemini = async (
 
   let lastError = "";
 
+  // Loop principal: Tenta cada CHAVE
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
+    console.log(`[Mara] Tentando chave final ...${apiKey.slice(-4)}`);
 
+    // Loop secundário: Tenta modelos com essa chave
     for (const model of modelsToTry) {
         try {
             const chat = ai.chats.create({
@@ -162,15 +176,22 @@ export const sendMessageToGemini = async (
             }
 
             if (model !== savedModel) localStorage.setItem('mara_working_model', model);
+            
+            // Sucesso! Retorna imediatamente.
             return responseText;
 
         } catch (error: any) {
             lastError = error.message || "Erro desconhecido";
-            // Se erro for 429 (Cota), tenta próxima chave imediatamente
-            if (lastError.includes('429') || lastError.includes('Quota')) break;
+            console.warn(`[Mara] Erro na chave ...${apiKey.slice(-4)} / Modelo ${model}:`, lastError);
+
+            // Se erro for 429 (Cota Excedida) ou 403 (Permissão),
+            // SAÍMOS do loop de modelos e pulamos IMEDIATAMENTE para a próxima CHAVE.
+            if (lastError.includes('429') || lastError.includes('Quota') || lastError.includes('403')) {
+                break; // Break inner loop -> vai para o próximo 'apiKey'
+            }
         }
     }
   }
 
-  return `⚠️ **Erro de Conexão**\n\nO Google recusou a conexão.\nDetalhe: ${lastError.slice(0, 100)}`;
+  return `⚠️ **Mara Indisponível**\n\nTodas as chaves (${apiKeys.length}) retornaram erro de cota ou falha.\n\nDica: Se adicionou chaves novas na Vercel agora, faça um REDEPLOY do projeto.`;
 };
