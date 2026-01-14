@@ -1,27 +1,33 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// Helper to safely get API Key supporting multiple naming conventions
-const getApiKey = () => {
+// Helper to get API Key dynamically at runtime
+const getApiKey = (): string => {
+  // 1. First, check for manual override in Local Storage (set via Settings UI)
+  if (typeof window !== 'undefined') {
+    const localKey = localStorage.getItem('mara_gemini_api_key');
+    if (localKey && localKey.trim().length > 0) return localKey;
+  }
+
+  // 2. Check Environment Variables (Build time injection)
+  // Note: Standard Vercel env vars (like API_KEY_1) are NOT exposed to the client unless prefixed with NEXT_PUBLIC_ or VITE_
   if (typeof process !== 'undefined' && process.env) {
-    // Check the variable specifically seen in your screenshot: API_KEY_1
     if (process.env.API_KEY_1) return process.env.API_KEY_1;
-    if (process.env.API_KEY) return process.env.API_KEY;
+    if (process.env.NEXT_PUBLIC_API_KEY_1) return process.env.NEXT_PUBLIC_API_KEY_1;
     if (process.env.NEXT_PUBLIC_API_KEY) return process.env.NEXT_PUBLIC_API_KEY;
+    if (process.env.API_KEY) return process.env.API_KEY;
   }
   
-  // Try Vite/Import Meta
-  if (typeof import.meta !== 'undefined') {
-    const metaEnv = (import.meta as any).env;
-    if (metaEnv) {
-       if (metaEnv.API_KEY_1) return metaEnv.API_KEY_1;
-       if (metaEnv.VITE_API_KEY) return metaEnv.VITE_API_KEY;
-    }
+  // 3. Check Vite specific
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+    const env = (import.meta as any).env;
+    if (env.VITE_API_KEY) return env.VITE_API_KEY;
+    if (env.VITE_API_KEY_1) return env.VITE_API_KEY_1;
+    if (env.API_KEY_1) return env.API_KEY_1;
   }
+
   return '';
 };
-
-const apiKey = getApiKey();
 
 // Function Declaration for notifying the team
 const notifyTeamFunction: FunctionDeclaration = {
@@ -59,9 +65,13 @@ export const sendMessageToGemini = async (
   systemInstruction: string,
   onToolCall?: (toolCall: any) => void
 ): Promise<string> => {
+  
+  // Fetch key at the moment of the call, not at module load
+  const apiKey = getApiKey();
+
   if (!apiKey) {
-    console.error("API Key (API_KEY ou API_KEY_1) não encontrada.");
-    return "Erro: Chave de API não configurada. Verifique o painel da Vercel (API_KEY_1).";
+    console.error("API Key não encontrada.");
+    return "⚠️ Erro de Configuração: API Key não detectada.\n\nPor favor, vá em 'Monitor de Chat > Configurações' e insira sua chave manualmente, ou renomeie a variável na Vercel para 'NEXT_PUBLIC_API_KEY'.";
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -132,8 +142,13 @@ export const sendMessageToGemini = async (
 
     return response.text || "";
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
+    
+    if (error.message?.includes('403') || error.message?.includes('API key')) {
+         return "Erro de Autenticação: Sua Chave de API parece inválida ou expirou. Verifique as configurações.";
+    }
+
     return "Desculpe, estou tendo dificuldades técnicas momentâneas. Podemos tentar novamente?";
   }
 };

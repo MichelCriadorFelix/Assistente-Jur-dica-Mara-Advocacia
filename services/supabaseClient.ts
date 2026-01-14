@@ -36,10 +36,10 @@ const supabaseUrl =
 
 const supabaseAnonKey = 
   getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY') ||
-  getEnvVar('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'); // Alternative name often used
+  getEnvVar('SUPABASE_PUBLISHABLE_KEY') || // Matches your Vercel Screenshot
+  getEnvVar('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'); 
 
 // Fallback values to prevent "supabaseUrl is required" crash
-// This allows the app to load visually even if DB connection fails, showing logs instead of white screen.
 const finalUrl = supabaseUrl || 'https://placeholder.supabase.co';
 const finalKey = supabaseAnonKey || 'placeholder';
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Message, Contact, AppConfig } from '../types';
-import { Search, Bot, User, RefreshCw } from 'lucide-react';
+import { Search, Bot, User, RefreshCw, Key, Save } from 'lucide-react';
 import { chatService } from '../services/chatService';
 
 interface ChatMonitorProps {
@@ -12,7 +12,10 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  
   const [promptEditable, setPromptEditable] = useState(config.systemPrompt);
+  const [manualApiKey, setManualApiKey] = useState('');
+  
   const [activeTab, setActiveTab] = useState<'chat' | 'settings'>('chat');
   const [loading, setLoading] = useState(false);
 
@@ -28,6 +31,11 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
     fetchContacts();
     // Simple polling every 10 seconds to keep list fresh
     const interval = setInterval(fetchContacts, 10000);
+    
+    // Load existing manual key
+    const savedKey = localStorage.getItem('mara_gemini_api_key');
+    if (savedKey) setManualApiKey(savedKey);
+
     return () => clearInterval(interval);
   }, []);
 
@@ -40,7 +48,17 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
 
   const handleSavePrompt = () => {
     onUpdateConfig({ ...config, systemPrompt: promptEditable });
-    alert('Prompt do Sistema atualizado! A próxima interação usará as novas regras.');
+    alert('Configurações salvas!');
+  };
+
+  const handleSaveApiKey = () => {
+    if (manualApiKey.trim()) {
+        localStorage.setItem('mara_gemini_api_key', manualApiKey.trim());
+        alert('Chave de API salva localmente! O app usará esta chave agora.');
+    } else {
+        localStorage.removeItem('mara_gemini_api_key');
+        alert('Chave removida. O app tentará usar as variáveis de ambiente.');
+    }
   };
 
   return (
@@ -91,17 +109,19 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
 
       {/* Main Content Area */}
       <div className="hidden md:flex flex-1 flex-col bg-gray-50 dark:bg-gray-900/50">
-        {selectedContactId ? (
+        {selectedContactId || activeTab === 'settings' ? (
           <>
             {/* Header */}
             <div className="h-16 bg-white dark:bg-gray-800 border-b dark:border-gray-700 flex justify-between items-center px-6">
               <div className="flex items-center gap-3">
                  <div className="font-semibold text-lg dark:text-white">
-                   {contacts.find(c => c.id === selectedContactId)?.name}
+                   {activeTab === 'chat' ? contacts.find(c => c.id === selectedContactId)?.name : 'Configurações'}
                  </div>
-                 <div className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                   Banco de Dados (Supabase)
-                 </div>
+                 {activeTab === 'chat' && (
+                    <div className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                      Supabase Online
+                    </div>
+                 )}
               </div>
               <div className="flex gap-2">
                  <button onClick={() => setActiveTab('settings')} className={`p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${activeTab === 'settings' ? 'text-emerald-600' : 'text-gray-500'}`}>
@@ -138,7 +158,34 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
                     </div>
                  )
                ) : (
-                 <div className="max-w-2xl mx-auto space-y-6">
+                 <div className="max-w-2xl mx-auto space-y-8">
+                    
+                    {/* API Key Section */}
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
+                       <h3 className="text-lg font-medium mb-4 dark:text-white flex items-center gap-2">
+                         <Key className="w-5 h-5" /> Chave de API (Gemini)
+                       </h3>
+                       <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded mb-4 text-xs text-yellow-800 dark:text-yellow-200">
+                          Se o app não estiver conseguindo ler a variável da Vercel (API_KEY_1), cole sua chave aqui manualmente.
+                       </div>
+                       <div className="flex gap-2">
+                         <input 
+                           type="password" 
+                           placeholder="Cole sua API Key aqui (AIza...)" 
+                           className="flex-1 p-2 text-sm border rounded outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                           value={manualApiKey}
+                           onChange={(e) => setManualApiKey(e.target.value)}
+                         />
+                         <button 
+                           onClick={handleSaveApiKey}
+                           className="bg-gray-900 text-white px-4 py-2 rounded text-sm hover:bg-black"
+                         >
+                           Salvar Chave
+                         </button>
+                       </div>
+                    </div>
+
+                    {/* Persona Section */}
                     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
                       <h3 className="text-lg font-medium mb-4 dark:text-white flex items-center gap-2">
                         <Bot className="w-5 h-5" /> Instruções do Sistema (Persona)
@@ -152,19 +199,20 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
                       <div className="mt-4 flex justify-end">
                         <button 
                           onClick={handleSavePrompt}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2"
                         >
-                          Salvar Alterações
+                          <Save className="w-4 h-4" /> Salvar Prompt
                         </button>
                       </div>
                     </div>
+
                  </div>
                )}
             </div>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-            <p>Selecione um contato para monitorar</p>
+            <p>Selecione um contato ou vá em Configurações</p>
           </div>
         )}
       </div>
