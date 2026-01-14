@@ -4,7 +4,7 @@ import ChatInterface from './components/ChatInterface';
 import DashboardLayout from './components/DashboardLayout';
 import DashboardStats from './components/DashboardStats';
 import ChatMonitor from './components/ChatMonitor';
-import { ViewState, AppConfig, Message } from './types';
+import { ViewState, AppConfig } from './types';
 import { INITIAL_CONFIG } from './constants';
 import { Smartphone } from 'lucide-react';
 
@@ -13,9 +13,6 @@ function App() {
   const [dashboardPage, setDashboardPage] = useState('stats');
   const [config, setConfig] = useState<AppConfig>(INITIAL_CONFIG);
   
-  // Shared state to simulate database between Client View and Admin Monitor
-  const [liveMessages, setLiveMessages] = useState<Message[]>([]);
-
   // Simple "Router"
   const renderView = () => {
     switch (view) {
@@ -28,7 +25,6 @@ function App() {
              <ChatInterface 
                onBack={() => setView(ViewState.DASHBOARD)} 
                config={config}
-               setGlobalMessages={setLiveMessages}
              />
           </div>
         );
@@ -43,7 +39,6 @@ function App() {
             {dashboardPage === 'stats' && <DashboardStats />}
             {dashboardPage === 'chat' && (
               <ChatMonitor 
-                currentLiveMessages={liveMessages}
                 config={config}
                 onUpdateConfig={setConfig}
               />

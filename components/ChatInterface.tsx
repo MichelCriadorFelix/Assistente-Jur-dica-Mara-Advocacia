@@ -3,31 +3,48 @@ import { Send, MoreVertical, Phone, Video, ArrowLeft } from 'lucide-react';
 import AudioRecorder from './AudioRecorder';
 import { Message, AppConfig } from '../types';
 import { sendMessageToGemini } from '../services/geminiService';
+import { chatService } from '../services/chatService';
 
 interface ChatInterfaceProps {
   onBack: () => void;
   config: AppConfig;
-  setGlobalMessages: (msgs: Message[]) => void;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config, setGlobalMessages }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'init-1',
-      role: 'model',
-      content: 'Olá! Sou a Mara, assistente virtual da Justiça & Associados. Como posso ajudar você hoje?',
-      type: 'text',
-      timestamp: new Date()
-    }
-  ]);
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [contactId, setContactId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Sync with global state for dashboard monitoring
+  // Initialize Session (Get or Create Contact ID)
   useEffect(() => {
-    setGlobalMessages(messages);
-  }, [messages, setGlobalMessages]);
+    const initSession = async () => {
+      // Try to recover session from local storage to keep history on refresh
+      const storedId = localStorage.getItem('mara_contact_id');
+      try {
+        const id = await chatService.getOrCreateContact(storedId);
+        setContactId(id);
+        localStorage.setItem('mara_contact_id', id);
+
+        // Load History
+        const history = await chatService.loadMessages(id);
+        if (history.length > 0) {
+          setMessages(history);
+        } else {
+           // Initial greeting if new
+           const initialMsg: Message = {
+             id: 'init', role: 'model', content: 'Olá! Sou a Mara, assistente virtual da Justiça & Associados. Como posso ajudar você hoje?', type: 'text', timestamp: new Date()
+           };
+           setMessages([initialMsg]);
+           // We don't save the initial hardcoded message to DB to save space, but you could.
+        }
+      } catch (e) {
+        console.error("Failed to init chat session", e);
+      }
+    };
+    initSession();
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -38,10 +55,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config, setGlobal
   }, [messages]);
 
   const handleSendMessage = async (text?: string, audioBlob?: Blob) => {
-    if (!text && !audioBlob) return;
+    if ((!text && !audioBlob) || !contactId) return;
 
     const newMessage: Message = {
-      id: Date.now().toString(),
+      id: Date.now().toString(), // Temp ID
       role: 'user',
       content: text || 'Áudio enviado',
       type: audioBlob ? 'audio' : 'text',
@@ -49,10 +66,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config, setGlobal
       audioUrl: audioBlob ? URL.createObjectURL(audioBlob) : undefined
     };
 
+    // Optimistic UI update
     const newHistory = [...messages, newMessage];
     setMessages(newHistory);
     setInputText('');
     setIsLoading(true);
+
+    // Persist User Message
+    await chatService.saveMessage(contactId, newMessage);
 
     try {
       let audioBase64: string | undefined;
@@ -63,16 +84,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config, setGlobal
           reader.readAsDataURL(audioBlob);
           reader.onloadend = () => {
              const base64 = reader.result as string;
-             // Remove data URL prefix for Gemini API
              resolve(base64.split(',')[1]); 
           };
         });
       }
 
+      // Call AI
       const responseText = await sendMessageToGemini(
         newHistory, 
         { text, audioBase64 }, 
-        config.systemPrompt
+        config.systemPrompt,
+        async (toolCall) => {
+          // If the AI calls 'notificar_equipe', we update the contact status in DB
+          if (toolCall.name === 'notificar_equipe') {
+             const { clientName, summary, priority } = toolCall.args;
+             console.log("Tool Triggered:", toolCall.args);
+             // Update contact name if AI detected it
+             await chatService.updateContactStatus(contactId, 'triaged', clientName);
+          }
+        }
       );
 
       const botMessage: Message = {
@@ -84,9 +114,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config, setGlobal
       };
 
       setMessages(prev => [...prev, botMessage]);
+      
+      // Persist Bot Message
+      await chatService.saveMessage(contactId, botMessage);
+
     } catch (error) {
       console.error(error);
-      // Ideally handle error state here
     } finally {
       setIsLoading(false);
     }

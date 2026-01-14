@@ -29,8 +29,7 @@
       }
     </script>
     <script>
-      // Polyfill for process.env to allow ESM usage of the Gemini SDK without a bundler
-      // This ensures the app doesn't crash if process is undefined
+      // Polyfill for process.env 
       window.process = {
         env: {
           NODE_ENV: 'development',
@@ -42,6 +41,7 @@
 {
   "imports": {
     "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.0",
     "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client",
     "react-dom": "https://esm.sh/react-dom@^19.2.3",
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
