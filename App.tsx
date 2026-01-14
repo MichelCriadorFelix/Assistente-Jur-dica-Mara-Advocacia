@@ -4,7 +4,6 @@ import { INITIAL_CONFIG } from './constants';
 import { Smartphone, Loader2 } from 'lucide-react';
 
 // Lazy Loading: Carrega os componentes apenas quando necessários
-// Isso reduz drasticamente o tamanho do arquivo inicial (index.js)
 const LoginScreen = lazy(() => import('./components/LoginScreen'));
 const ChatInterface = lazy(() => import('./components/ChatInterface'));
 const DashboardLayout = lazy(() => import('./components/DashboardLayout'));
@@ -16,6 +15,15 @@ function App() {
   const [view, setView] = useState<ViewState>(ViewState.LOGIN);
   const [dashboardPage, setDashboardPage] = useState('stats');
   const [config, setConfig] = useState<AppConfig>(INITIAL_CONFIG);
+  
+  // Estado para controlar o filtro vindo do Dashboard (ex: clicar em 'Urgente')
+  const [chatFilter, setChatFilter] = useState<'all' | 'urgent' | 'triaged' | 'new'>('all');
+
+  // Função para navegar e filtrar ao mesmo tempo
+  const handleDashboardFilter = (filter: 'all' | 'urgent' | 'triaged' | 'new') => {
+    setChatFilter(filter);
+    setDashboardPage('chat');
+  };
   
   // Simple "Router"
   const renderView = () => {
@@ -40,11 +48,16 @@ function App() {
             currentPage={dashboardPage}
             onNavigate={setDashboardPage}
           >
-            {dashboardPage === 'stats' && <DashboardStats />}
+            {dashboardPage === 'stats' && (
+              <DashboardStats 
+                onNavigateToChat={handleDashboardFilter} 
+              />
+            )}
             {dashboardPage === 'chat' && (
               <ChatMonitor 
                 config={config}
                 onUpdateConfig={setConfig}
+                initialFilter={chatFilter}
               />
             )}
             {dashboardPage === 'settings' && (

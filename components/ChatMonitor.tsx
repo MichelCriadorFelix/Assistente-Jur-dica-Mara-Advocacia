@@ -1,22 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { Message, Contact, AppConfig } from '../types';
-import { Search, Bot, User, RefreshCw, Save, Database } from 'lucide-react';
+import { Search, Bot, User, RefreshCw, Save, Filter } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 
 interface ChatMonitorProps {
   config: AppConfig;
   onUpdateConfig: (cfg: AppConfig) => void;
+  initialFilter?: 'all' | 'urgent' | 'triaged' | 'new';
 }
 
-const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => {
+const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initialFilter = 'all' }) => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   
+  // Estado local do filtro, iniciado pela prop mas mutável pelo usuário
+  const [activeFilter, setActiveFilter] = useState(initialFilter);
+
   const [promptEditable, setPromptEditable] = useState(config.systemPrompt);
   const [showPromptEdit, setShowPromptEdit] = useState(false);
-
   const [loading, setLoading] = useState(false);
 
   // Load Contacts on Mount and Refresh
@@ -29,10 +32,14 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
 
   useEffect(() => {
     fetchContacts();
-    // Simple polling every 10 seconds to keep list fresh
     const interval = setInterval(fetchContacts, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Atualiza o filtro se a prop mudar (ex: navegação vinda do dashboard)
+  useEffect(() => {
+    setActiveFilter(initialFilter);
+  }, [initialFilter]);
 
   // Load messages when contact is selected
   useEffect(() => {
@@ -47,28 +54,64 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
     alert('Persona da IA atualizada!');
   };
 
+  // Lógica de Filtragem
+  const filteredContacts = contacts.filter(contact => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'urgent') return contact.status === 'urgent' || contact.status === 'new'; // 'new' geralmente requer atenção
+    if (activeFilter === 'new') return contact.status === 'new';
+    return contact.status === activeFilter;
+  });
+
   return (
     <div className="flex h-full bg-white dark:bg-gray-900 rounded-xl overflow-hidden shadow-sm border dark:border-gray-700">
       
       {/* Sidebar List */}
       <div className="w-full md:w-1/3 border-r dark:border-gray-700 flex flex-col">
-        <div className="p-4 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
-            <input 
-              type="text" 
-              placeholder="Buscar conversa..." 
-              className="w-full pl-9 pr-4 py-2 text-sm rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-whatsapp-green outline-none" 
-            />
+        
+        {/* Header da Sidebar */}
+        <div className="p-4 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+              <input 
+                type="text" 
+                placeholder="Buscar conversa..." 
+                className="w-full pl-9 pr-4 py-2 text-sm rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-whatsapp-green outline-none" 
+              />
+            </div>
+            <button onClick={fetchContacts} className="p-2 text-gray-500 hover:text-emerald-600" title="Atualizar">
+               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
-          <button onClick={fetchContacts} className="p-2 text-gray-500 hover:text-emerald-600" title="Atualizar">
-             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
+
+          {/* Abas de Filtro */}
+          <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+            {[
+              { id: 'all', label: 'Todos' },
+              { id: 'urgent', label: 'Atenção' },
+              { id: 'triaged', label: 'Finalizados' }
+            ].map((filter) => (
+              <button
+                key={filter.id}
+                onClick={() => setActiveFilter(filter.id as any)}
+                className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors whitespace-nowrap ${
+                  activeFilter === filter.id 
+                    ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900 dark:text-emerald-300 dark:border-emerald-800' 
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600'
+                }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {/* Lista de Contatos */}
         <div className="flex-1 overflow-y-auto">
-           {contacts.length === 0 ? (
+           {filteredContacts.length === 0 ? (
              <div className="p-8 text-center text-gray-500 text-sm flex flex-col items-center">
-                <p>Nenhum atendimento iniciado.</p>
+                <Filter className="w-8 h-8 mb-2 opacity-20" />
+                <p>Nenhum atendimento encontrado para este filtro.</p>
                 {!isSupabaseConfigured && (
                    <span className="text-xs text-blue-500 mt-2 bg-blue-50 px-2 py-1 rounded">
                      Modo Local (Offline) Ativo
@@ -76,11 +119,11 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
                 )}
              </div>
            ) : (
-             contacts.map(contact => (
+             filteredContacts.map(contact => (
                <div 
                  key={contact.id}
                  onClick={() => { setSelectedContactId(contact.id); setShowPromptEdit(false); }}
-                 className={`flex items-center gap-3 p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition ${selectedContactId === contact.id ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}
+                 className={`flex items-center gap-3 p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition border-b dark:border-gray-700/50 ${selectedContactId === contact.id ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}
                >
                  <div className="relative">
                    <img src={contact.avatar} alt={contact.name} className="w-12 h-12 rounded-full object-cover" />
