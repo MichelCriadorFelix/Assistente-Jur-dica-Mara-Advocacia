@@ -1,7 +1,16 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// Helper para embaralhar chaves (Evita que a chave 1 bloqueie sempre se estiver sem cota)
+// --- CONFIGURAÇÃO DE ENGENHARIA ---
+// O modelo "gemini-2.5" solicitado ainda não possui endpoint público (gera erro 404).
+// O modelo mais avançado e ATUAL disponível na API é o "gemini-2.0-flash".
+// Configuramos ele como PRINCIPAL e o 1.5 como BACKUP de segurança.
+const MODELS = {
+  PRIMARY: 'gemini-2.0-flash', 
+  BACKUP: 'gemini-1.5-flash'
+};
+
+// Helper para embaralhar chaves (Balanceamento de Carga)
 const shuffleArray = (array: string[]) => {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -10,28 +19,16 @@ const shuffleArray = (array: string[]) => {
   return array;
 };
 
-// MODELO NATIVO DEFINITIVO
-// O usuário solicitou "Gemini 2.5 Flash". Como este modelo de texto ainda não existe publicamente na API (gerando erro 404),
-// utilizamos o "gemini-1.5-flash" que é a versão Flash mais atual, ESTÁVEL e com maior cota gratuita.
-// O 'gemini-2.0-flash' fica como fallback caso o 1.5 falhe.
-const PRIMARY_MODEL = 'gemini-1.5-flash'; 
-const FALLBACK_MODEL = 'gemini-2.0-flash'; 
-
-const getModelName = (): string => {
-  // Prioriza sempre o modelo estável definido no código
-  return PRIMARY_MODEL;
-};
-
-// Helper para coletar chaves. 
+// Coletor de Chaves de API (Incluindo a nova VITE_APP_PARAM_3)
 export const getAvailableApiKeys = (): string[] => {
   const keys: string[] = [];
 
-  // Variáveis de Ambiente
+  // Mapeamento de TODAS as variáveis possíveis do ambiente Vercel/Vite
   const envVars = [
     (import.meta as any).env?.VITE_ux_config,
     (import.meta as any).env?.VITE_APP_PARAM_1,
     (import.meta as any).env?.VITE_APP_PARAM_2,
-    (import.meta as any).env?.VITE_APP_PARAM_3,
+    (import.meta as any).env?.VITE_APP_PARAM_3, // Adicionado conforme print
     (import.meta as any).env?.VITE_PUBLIC_DATA_1,
     (import.meta as any).env?.VITE_G_CREDENTIAL,
     (import.meta as any).env?.VITE_API_KEY, 
@@ -40,27 +37,30 @@ export const getAvailableApiKeys = (): string[] => {
   ];
 
   envVars.forEach(k => {
-    // Validação robusta para chaves
-    if (k && typeof k === 'string' && k.length > 20 && !k.includes('placeholder')) {
+    // Validação estrita: chaves do Gemini são longas e não contém espaços
+    if (k && typeof k === 'string' && k.length > 30 && !k.includes('placeholder')) {
       const cleanKey = k.replace(/["']/g, '').trim();
       keys.push(cleanKey);
     }
   });
 
-  // Local Storage (Adiciona chaves manuais se houver)
+  // Chave Manual (LocalStorage) tem prioridade máxima se existir
   if (typeof window !== 'undefined') {
     const localKey = localStorage.getItem('mara_gemini_api_key');
     if (localKey && localKey.trim().length > 0) {
+      // Coloca no início do array
       keys.unshift(localKey.trim());
+      return [...new Set(keys)]; // Retorna sem embaralhar para priorizar a manual
     }
   }
 
   const uniqueKeys = [...new Set(keys)].filter(k => !!k);
   
-  // Embaralha para distribuir a carga
+  // Embaralha as chaves do ambiente para evitar que uma chave ruim trave todos os usuários
   return shuffleArray(uniqueKeys);
 };
 
+// Definição da Ferramenta (Function Calling)
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
   description: 'Notifica o advogado responsável sobre um novo caso triado.',
@@ -80,31 +80,35 @@ const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Teste de Conexão Isolado
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
   const keys = getAvailableApiKeys();
-  const model = getModelName();
   
-  if (keys.length === 0) return { success: false, message: "Nenhuma chave encontrada." };
+  if (keys.length === 0) return { success: false, message: "Nenhuma chave encontrada nas variáveis de ambiente." };
 
-  // Tenta testar apenas a primeira chave válida para rapidez
   for (const apiKey of keys) {
     try {
       const ai = new GoogleGenAI({ apiKey });
-      const chat = ai.chats.create({ model, history: [] });
-      await chat.sendMessage({ message: [{ text: "Oi" }] });
-      return { success: true, message: `Conexão OK com modelo ${model}!`, keyUsed: apiKey.slice(-4) };
+      // Testa com o modelo primário
+      const chat = ai.chats.create({ model: MODELS.PRIMARY, history: [] });
+      await chat.sendMessage({ message: [{ text: "Ping de teste" }] });
+      return { success: true, message: `Conectado via ${MODELS.PRIMARY}`, keyUsed: apiKey.slice(-4) };
     } catch (e: any) {
-      console.warn(`Teste falhou para chave ...${apiKey.slice(-4)}: ${e.message}`);
-      // Se for erro de cota, tenta a próxima. Se for erro de modelo (404), aborta.
-      if (e.message.includes('404') || e.message.includes('not found')) {
-         return { success: false, message: `Erro Crítico: O modelo '${model}' não existe na API do Google.` };
-      }
+      console.warn(`Teste falhou na chave ...${apiKey.slice(-4)}: ${e.message}`);
+      // Se falhar o primário, tenta o backup na mesma chave antes de desistir dela
+      try {
+        const aiBackup = new GoogleGenAI({ apiKey });
+        const chatBackup = aiBackup.chats.create({ model: MODELS.BACKUP, history: [] });
+        await chatBackup.sendMessage({ message: [{ text: "Ping" }] });
+        return { success: true, message: `Conectado via ${MODELS.BACKUP} (Fallback)`, keyUsed: apiKey.slice(-4) };
+      } catch (e2) {}
     }
   }
   
-  return { success: false, message: "Todas as chaves falharam no teste." };
+  return { success: false, message: "Todas as chaves falharam ou estão sem cota." };
 };
 
+// Função Principal de Chat
 export const sendMessageToGemini = async (
   history: Message[],
   newMessage: { text?: string; audioBase64?: string; mimeType?: string },
@@ -113,17 +117,18 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   const apiKeys = getAvailableApiKeys();
-  let modelName = getModelName();
   
-  const minThinkingTime = 2000; // Tempo reduzido para resposta mais rápida
-  const maxThinkingTime = 5000;
+  // UX: Tempo de "digitando..." humanizado
+  const minThinkingTime = 1500;
+  const maxThinkingTime = 4000;
   const targetThinkingTime = Math.floor(Math.random() * (maxThinkingTime - minThinkingTime + 1) + minThinkingTime);
   const startTime = Date.now();
 
   if (apiKeys.length === 0) {
-    return "⚠️ **Erro Crítico**\n\nNenhuma chave de API configurada. O sistema não pode responder.";
+    return "⚠️ **Erro de Configuração**\n\nNão encontrei chaves de API válidas. Verifique o Vercel ou as Configurações.";
   }
 
+  // Prepara o histórico para o formato do Google
   const chatHistory: Content[] = history
     .filter(m => m.role !== 'system')
     .map(m => ({
@@ -133,6 +138,7 @@ export const sendMessageToGemini = async (
         : [{ text: '[Áudio enviado pelo usuário]' }]
     }));
 
+  // Prepara a mensagem atual (Texto ou Áudio+Texto)
   const currentParts: Part[] = [];
   if (newMessage.audioBase64) {
     currentParts.push({
@@ -146,80 +152,69 @@ export const sendMessageToGemini = async (
     currentParts.push({ text: newMessage.text });
   }
 
-  let lastError = "";
+  let lastDetailedError = "";
 
-  // LOOP DE ROTAÇÃO DE CHAVES
+  // TENTA CADA CHAVE DISPONÍVEL (Load Balancer & Failover)
   for (const apiKey of apiKeys) {
-    const isLastKey = apiKeys.indexOf(apiKey) === apiKeys.length - 1;
     const keySuffix = apiKey.slice(-4);
     
-    // TENTATIVA PRINCIPAL
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const chat = ai.chats.create({
-        model: modelName,
-        config: { systemInstruction, tools },
-        history: chatHistory
-      });
+    // Tenta primeiro o modelo 2.0, se falhar, tenta o 1.5 NA MESMA CHAVE
+    const modelsToTry = [MODELS.PRIMARY, MODELS.BACKUP];
 
-      const result = await chat.sendMessage({ message: currentParts });
-      
-      let finalResponseText = result.text || "";
-
-      if (result.functionCalls && result.functionCalls.length > 0) {
-        const call = result.functionCalls[0];
-        if (onToolCall) onToolCall({ name: call.name, args: call.args });
-        const finalResult = await chat.sendMessage({
-          message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
-        });
-        finalResponseText = finalResult.text || "";
-      }
-
-      // Delay Humano
-      const elapsedTime = Date.now() - startTime;
-      if (elapsedTime < targetThinkingTime) {
-        await sleep(targetThinkingTime - elapsedTime);
-      }
-      
-      return finalResponseText;
-
-    } catch (error: any) {
-      const msg = error.message || JSON.stringify(error);
-      lastError = msg;
-      
-      console.warn(`[Mara] Falha no modelo ${modelName} com chave ...${keySuffix}. Erro: ${msg}`);
-
-      const isQuotaError = msg.includes('429') || msg.includes('Quota') || msg.includes('RESOURCE_EXHAUSTED');
-      const isNotFoundError = msg.includes('404') || msg.includes('not found');
-
-      // FALLBACK DE EMERGÊNCIA
-      // Se o modelo principal falhar (seja por cota ou por não existir), tenta o Fallback
-      if ((isQuotaError || isNotFoundError) && modelName === PRIMARY_MODEL) {
-          console.log(`[Mara Fallback] Erro no principal. Tentando fallback para ${FALLBACK_MODEL}...`);
-          try {
-             const aiFallback = new GoogleGenAI({ apiKey });
-             const chatFallback = aiFallback.chats.create({
-                model: FALLBACK_MODEL,
-                config: { systemInstruction, tools },
+    for (const model of modelsToTry) {
+        try {
+            const ai = new GoogleGenAI({ apiKey });
+            const chat = ai.chats.create({
+                model: model,
+                config: { 
+                    systemInstruction, 
+                    tools,
+                    temperature: 0.7 // Criatividade balanceada
+                },
                 history: chatHistory
-             });
-             const resultFallback = await chatFallback.sendMessage({ message: currentParts });
-             
-             return resultFallback.text || "";
+            });
 
-          } catch (fallbackError: any) {
-             console.warn(`[Mara Fallback] Falhou também no ${FALLBACK_MODEL}.`);
-             // Continua para a próxima chave
-          }
-      }
+            const result = await chat.sendMessage({ message: currentParts });
+            
+            // Processamento de Sucesso
+            let finalResponseText = result.text || "";
 
-      // Se não foi possível recuperar, tenta a próxima chave
-      if (!isLastKey) {
-          continue; 
-      }
+            // Se a IA chamou uma função (ex: notificar equipe)
+            if (result.functionCalls && result.functionCalls.length > 0) {
+                const call = result.functionCalls[0];
+                if (onToolCall) onToolCall({ name: call.name, args: call.args });
+                
+                // Envia confirmação silenciosa para a IA continuar o papo
+                const finalResult = await chat.sendMessage({
+                message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
+                });
+                finalResponseText = finalResult.text || "";
+            }
+
+            // Delay cosmético para parecer humano
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime < targetThinkingTime) {
+                await sleep(targetThinkingTime - elapsedTime);
+            }
+            
+            return finalResponseText; // SUCESSO! Retorna e encerra.
+
+        } catch (error: any) {
+            const msg = error.message || JSON.stringify(error);
+            lastDetailedError = `${model} (${keySuffix}): ${msg}`;
+            
+            console.warn(`[Mara AI] Falha: ${lastDetailedError}`);
+
+            // Se o erro for 404 (Modelo não existe) ou 400 (Bad Request), pular modelo.
+            // Se for 429 (Quota), pular chave.
+            
+            if (msg.includes('429') || msg.includes('Quota')) {
+                break; // Quebra o loop de modelos e vai para a PRÓXIMA CHAVE
+            }
+        }
     }
   }
 
-  // Se tudo falhar
-  return `⚠️ **Sistema Indisponível**\n\nNão foi possível conectar à IA.\n\nDetalhe Técnico: ${lastError.slice(0, 150)}`;
+  // Se chegou aqui, TODAS as tentativas falharam
+  return `⚠️ **Mara Indisponível**\n\nO sistema está temporariamente fora do ar por alto volume.\n\nCod: ${lastDetailedError.slice(0, 50)}...`;
 };
