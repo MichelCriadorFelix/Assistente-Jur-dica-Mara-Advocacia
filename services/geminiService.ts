@@ -71,7 +71,7 @@ export const sendMessageToGemini = async (
 
   if (!apiKey) {
     console.error("API Key não encontrada.");
-    return "⚠️ Erro de Configuração: API Key não detectada.\n\nO sistema buscou por 'VITE_API_KEY_1' mas não encontrou. Vá em 'Configurações' neste app e cole a chave manualmente para testar agora.";
+    return "⚠️ Erro de Configuração: Chave de API não encontrada.\n\nO sistema tentou ler 'VITE_API_KEY_1' mas retornou vazio. Verifique se a variável está exposta no ambiente (Environment Variables) ou insira manualmente nas configurações.";
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -102,9 +102,9 @@ export const sendMessageToGemini = async (
   }
 
   try {
-    // Usando modelo estável 'gemini-2.0-flash-exp' ou 'gemini-1.5-flash' se o 2.0 falhar
+    // Usando modelo estável 'gemini-1.5-flash' para garantir compatibilidade
     const chat = ai.chats.create({
-      model: 'gemini-2.0-flash-exp', 
+      model: 'gemini-1.5-flash', 
       config: {
         systemInstruction: systemInstruction,
         tools: tools,
@@ -146,15 +146,18 @@ export const sendMessageToGemini = async (
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     
-    // Tratamento de erros amigável
-    if (error.message?.includes('403') || error.message?.includes('API key')) {
-         return "🔒 Erro de Permissão: Sua chave de API não é válida ou não tem acesso ao modelo. Verifique no Google AI Studio.";
+    // Tratamento de erros detalhado para debug
+    let errorMsg = error.message || JSON.stringify(error);
+    
+    if (errorMsg.includes('403') || errorMsg.includes('API key')) {
+         return `🔒 Erro de Permissão (403): Chave inválida ou sem acesso.`;
     }
     
-    if (error.message?.includes('404') || error.message?.includes('not found')) {
-         return "❌ Erro de Modelo: O modelo de IA configurado está temporariamente indisponível. Tente novamente em alguns instantes.";
+    if (errorMsg.includes('404') || errorMsg.includes('not found')) {
+         return `❌ Modelo não encontrado (404). O 'gemini-1.5-flash' deve funcionar.`;
     }
 
-    return `⚠️ Erro Técnico: Não foi possível processar sua solicitação no momento.`;
+    // Retorna o erro real para o usuário ver o que aconteceu
+    return `⚠️ Erro Técnico: ${errorMsg}`;
   }
 };
