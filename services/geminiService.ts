@@ -83,86 +83,90 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
-// --- IA NATIVA 4.0 (FLUXO NATURAL & CONTEXTUAL - FALLBACK MELHORADO) ---
+// --- IA NATIVA 4.0 (LÓGICA CONSULTIVA & FLUIDA) ---
+// Essa função roda quando a API do Google falha, garantindo que a Mara não fique "burra".
 const runNativeMara = async (
   history: Message[], 
   lastUserText: string,
   onToolCall?: (toolCall: any) => void,
   caseContext?: string
 ): Promise<string> => {
-  console.log("[Mara Native] Analisando intenção natural (Modo Offline/Fallback)...");
+  console.log("[Mara Native] Modo Consultivo Ativado...");
   
-  // 1. Resposta sobre Prontuário (Contexto Prioritário)
-  if (caseContext && lastUserText.toLowerCase().match(/(como está|andamento|novidades|processo|perícia|audiência|status)/)) {
-     return `Verifiquei aqui no sistema sobre o seu caso:\n\n"${caseContext}"\n\nQualquer outra dúvida sobre isso, pode me perguntar.`;
-  }
-  
-  // Limpeza do texto para melhor detecção (remove exclamações, interrogações para match)
   const lower = lastUserText.toLowerCase().trim();
   const cleanText = lower.replace(/[!?.s]/g, ' ').trim(); 
-  const lastBotMsg = [...history].reverse().find(m => m.role === 'model')?.content || "";
   
-  // 2. DETECÇÃO DE SAUDAÇÃO (Robustez: Aceita 'oi!', 'boa tarde', etc.)
-  // Regex procura palavras inteiras
-  if (/(oi|ola|olá|bom dia|boa tarde|boa noite|tudo bem|ei|opa)\b/.test(lower)) {
-    return "Olá! Sou a Mara. 👋\n\nEstou aqui para ajudar. Pode me contar o que aconteceu ou qual sua dúvida jurídica?";
+  // Recupera a última coisa que a MARA disse para manter o contexto
+  const lastBotMsgRaw = [...history].reverse().find(m => m.role === 'model')?.content || "";
+  const lastBotMsg = lastBotMsgRaw.toLowerCase();
+
+  // 1. PRIORIDADE: CONTEXTO DO CASO (PRONTUÁRIO)
+  if (caseContext && lower.match(/(como está|andamento|novidades|processo|perícia|audiência|status|notícias)/)) {
+     return `Oi! Consultei aqui o sistema rapidinho. \n\n${caseContext}\n\nFique tranquilo, qualquer novidade extra te avisamos!`;
   }
 
-  // 3. Lógica Contextual (Simulada sem LLM)
+  // 2. DETECÇÃO DE PERGUNTA DO USUÁRIO (EVITA O LOOP "QUE DETALHES?")
+  if (lower.includes('que detalhes') || lower.includes('quais detalhes') || lower.includes('como assim') || lower.includes('o que falar')) {
+    return "Ah, desculpe! 😅 Eu preciso saber um pouco sobre o que aconteceu para chamar o advogado certo.\n\nPor exemplo: é sobre demissão no trabalho? Benefício do INSS negado? Ou pensão alimentícia?";
+  }
+
+  // 3. SAUDAÇÕES (Respondendo com educação)
+  if (/(oi|ola|olá|bom dia|boa tarde|boa noite|tudo bem|ei|opa)\b/.test(lower) && history.length < 3) {
+    return "Olá! Tudo bem? Sou a Mara, assistente virtual da Felix e Castro. 👋\n\nPode me contar o que houve? Estou aqui para te ouvir.";
+  }
+
+  // 4. LÓGICA DE CONTEXTO (Respondendo perguntas anteriores)
   
+  // Se a Mara perguntou idade antes...
+  if (lastBotMsg.includes('idade') || lastBotMsg.includes('anos')) {
+    if (lower.match(/\d+/)) {
+       return "Certo, anotei sua idade. E você sabe me dizer quanto tempo de contribuição (registro) você tem mais ou menos?";
+    }
+  }
+
+  // Se a Mara perguntou se trabalha ou saiu...
+  if ((lastBotMsg.includes('trabalhando') || lastBotMsg.includes('saiu')) && (lower.includes('sai') || lower.includes('trabalho') || lower.includes('ainda'))) {
+     return "Entendi. E sua carteira de trabalho foi assinada direitinho ou não registraram?";
+  }
+
+  // 5. DETECÇÃO DE ÁREA (INTENT RECOGNITION)
+
   // --- INSS ---
-  if (lower.match(/(inss|aposenta|benefício|loas|doença|encostado|perícia|auxílio)/)) {
-      if (lower.includes("negado") || lower.includes("cortaram")) {
-          return "Poxa, ter o benefício negado é muito frustrante. 😟 Mas podemos tentar reverter.\n\nVocê tem os laudos médicos atuais e a carta do INSS?";
-      }
-      return "Entendo. Para o Dr. Michel analisar essa questão do INSS, me diga: Qual a sua idade hoje e há quanto tempo você contribui?";
+  if (lower.match(/(inss|aposenta|benefício|loas|doença|encostado|perícia|auxílio|bpc|deficiente)/)) {
+      return "Entendi, é uma questão previdenciária. O Dr. Michel é especialista nisso. \n\nVocê já deu entrada no pedido e foi negado, ou quer dar entrada agora?";
   }
 
   // --- TRABALHISTA ---
-  if (lower.match(/(trabalh|empresa|patrão|demi|verba|justa causa|fgts|carteira|salário)/)) {
-      if (lower.includes("não pagou") || lower.includes("atrasado")) {
-          return "Isso é grave. O salário é sagrado. 😡\n\nEsse atraso acontece há muito tempo? Sua carteira é assinada?";
-      }
-      if (lower.includes("demiti") || lower.includes("mandou embora")) {
-         return "Sinto muito por isso. Perder o emprego é difícil. \n\nVocê sabe se eles vão pagar todos os seus direitos na rescisão? Você tinha carteira assinada?";
-      }
-      return "Certo. Para eu passar para a Dra. Luana: Você ainda está trabalhando lá ou já saiu?";
+  if (lower.match(/(trabalh|empresa|patrão|demi|verba|justa causa|fgts|carteira|salário|acerto|rescisão)/)) {
+      return "Compreendo, parece ser um caso trabalhista para a Dra. Luana. \n\nMe diga uma coisa: você ainda está trabalhando na empresa ou já saiu?";
   }
 
   // --- FAMÍLIA ---
-  if (lower.match(/(família|divórcio|separação|pensão|guarda|inventário|herança|ex-marido|ex-mulher)/)) {
-      if (lower.includes("não paga") && lower.includes("pensão")) {
-          return "Entendo sua preocupação. A pensão é direito da criança. \n\nJá existe um valor fixado pelo juiz ou era apenas um acordo de boca?";
+  if (lower.match(/(família|divórcio|separação|pensão|guarda|inventário|herança|ex-marido|ex-mulher|visita)/)) {
+      return "Certo, assuntos de família precisam de atenção especial da Dra. Flávia. \n\nNesse caso, existem filhos menores de idade envolvidos?";
+  }
+
+  // 6. ENCERRAMENTO DE TRIAGEM (HANDOVER)
+  // Se o usuário já falou bastante (heurística simples)
+  if (history.length > 6) {
+      if (onToolCall) {
+        const fullSummary = history.filter(m => m.role === 'user').map(m => m.content).join(" | ");
+        onToolCall({
+          name: 'notificar_equipe',
+          args: {
+            clientName: 'Cliente (Via Chat)',
+            summary: fullSummary,
+            lawyerName: 'A Definir na Triagem',
+            priority: 'Média'
+          }
+        });
       }
-      return "Compreendo. Assuntos de família são delicados. \n\nPara a Dra. Flávia te orientar: Existem filhos menores de idade envolvidos nesse caso?";
+      return "Obrigada pelas informações! 🙏\n\nJá passei tudo para a nossa equipe. Como seu caso tem detalhes importantes, vou pedir para a secretária analisar a agenda dos advogados e entrar em contato com você ainda hoje.";
   }
 
-  // Continuidade de conversa (Memória Curta Simulada)
-  if (lastBotMsg.includes("idade") && lower.match(/\d+/)) {
-      return "Certo. E você tem acesso à senha do site 'Meu INSS' (Gov.br)? Isso ajuda muito na análise do Dr. Michel.";
-  }
-  if (lastBotMsg.includes("carteira") && (lower.includes("sim") || lower.includes("não"))) {
-      if (onToolCall) performHandover(history, lastUserText, "Dra. Luana Castro", onToolCall);
-      return "Entendido. A falta de registro ou pagamento errado gera muitos direitos. \n\nJá passei seu relato para a Dra. Luana. Vamos analisar se cabe uma ação urgente. A Fabrícia vai entrar em contato para agendar.";
-  }
-
-  // Fallback HONESTO: Se não entendeu, diz que não entendeu.
-  // Não diz "Entendi" se não entendeu.
-  return "Desculpe, não consegui entender exatamente o contexto. 😕\n\nVocê poderia me explicar com outras palavras o que aconteceu? É sobre trabalho, INSS ou família?";
-};
-
-// Helper para finalizar o atendimento no modo nativo
-const performHandover = (history: Message[], lastText: string, lawyer: string, onToolCall: (t: any) => void) => {
-  const fullSummary = history.filter(m => m.role === 'user').map(m => m.content).join(" | ") + " | " + lastText;
-  onToolCall({
-    name: 'notificar_equipe',
-    args: {
-      clientName: 'Cliente (Triagem Natural)',
-      summary: `TRIAGEM AUTOMÁTICA:\n${fullSummary}`,
-      lawyerName: lawyer,
-      priority: 'Alta'
-    }
-  });
+  // 7. FALLBACK INTELIGENTE (QUANDO NÃO ENTENDE)
+  // Em vez de "Não entendi", ela oferece opções.
+  return "Entendi que você precisa de ajuda jurídica. \n\nPara eu chamar o especialista certo, me fale só mais uma coisa: \nIsso é sobre algum problema no **Trabalho**, com o **INSS** ou questão de **Família**?";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
