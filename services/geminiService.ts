@@ -67,7 +67,7 @@ export const getAvailableApiKeys = (): string[] => {
 
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
-  description: 'Notifica o advogado responsável.',
+  description: 'Notifica o advogado responsável com o relatório completo.',
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -82,54 +82,104 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
-// --- IA NATIVA (FALLBACK) ---
-// Um sistema especialista simples que garante funcionamento offline/sem cota
+// --- IA NATIVA 3.0 (CHECKLIST JURÍDICO ROBUSTO) ---
+// Opera como uma máquina de estados baseada no histórico da conversa
 const runNativeMara = async (
   history: Message[], 
   lastUserText: string,
   onToolCall?: (toolCall: any) => void
 ): Promise<string> => {
-  console.log("[Mara Native] Ativando modo de contingência...");
-  const lower = lastUserText.toLowerCase();
-
-  // 1. Identificação de Tópico
-  if (lower.includes('1') || lower.includes('inss') || lower.includes('aposenta') || lower.includes('benefício')) {
-    return "Entendido. Para casos de INSS (Dr. Michel), preciso saber: \n\nQual a sua idade e quanto tempo de contribuição você possui aproximadamente?";
-  }
-  if (lower.includes('2') || lower.includes('trabalh') || lower.includes('empresa') || lower.includes('demissão')) {
-    return "Certo, área Trabalhista (Dra. Luana). \n\nVocê foi demitido recentemente? Sua carteira era assinada?";
-  }
-  if (lower.includes('3') || lower.includes('famíli') || lower.includes('divórci') || lower.includes('pensão')) {
-    return "Ok, área de Família (Dra. Flávia). \n\nTrata-se de divórcio, guarda ou pensão alimentícia?";
-  }
-
-  // 2. Análise de Profundidade para Conclusão
-  // Se já trocamos mais de 3 mensagens, assumimos que o cliente já explicou o caso
-  const userMsgCount = history.filter(m => m.role === 'user').length;
+  console.log("[Mara Native] Executando checklist jurídico...");
   
-  if (userMsgCount >= 2) {
-    if (onToolCall) {
-      // Simula a extração de dados
-      let lawyer = "Equipe Geral";
-      if (history.some(m => m.content.includes('INSS') || m.content.includes('Michel'))) lawyer = "Dr. Michel Felix";
-      if (history.some(m => m.content.includes('Trabalhista') || m.content.includes('Luana'))) lawyer = "Dra. Luana Castro";
-      if (history.some(m => m.content.includes('Família') || m.content.includes('Flávia'))) lawyer = "Dra. Flávia Zacarias";
-
-      onToolCall({
-        name: 'notificar_equipe',
-        args: {
-          clientName: 'Cliente (Via Chat)',
-          summary: lastUserText,
-          lawyerName: lawyer,
-          priority: 'Normal'
-        }
-      });
-    }
-    return "Perfeito. Já anotei todos os detalhes e passei seu caso diretamente para a equipe jurídica. \n\nNossa secretária entrará em contato em breve para agendar sua consulta. Obrigado! ⚖️";
+  const lower = lastUserText.toLowerCase().trim();
+  
+  // Analisa a última mensagem do BOT para saber em qual "fase" estamos
+  const lastBotMsg = [...history].reverse().find(m => m.role === 'model')?.content || "";
+  
+  // === FASE 0: BOAS VINDAS ===
+  if (['oi', 'olá', 'ola', 'bom dia', 'tarde', 'noite', 'começar'].some(x => lower.includes(x)) && history.length < 3) {
+    return "Olá! Sou a Mara, assistente jurídica da Felix e Castro. ⚖️\n\nPara agilizar seu atendimento, preciso saber qual a área do seu caso:\n\n1. INSS / Aposentadoria (Dr. Michel)\n2. Trabalhista (Dra. Luana)\n3. Família / Divórcio (Dra. Flávia)";
   }
 
-  // 3. Resposta Genérica de Continuação
-  return "Entendo. Poderia me dar mais alguns detalhes sobre isso para que eu possa orientar o advogado corretamente?";
+  // === FASE 1: ROTEIRO INSS (DR. MICHEL) ===
+  const isInssContext = lower.match(/(1|inss|aposenta|benefício|loas)/) || lastBotMsg.includes("INSS") || lastBotMsg.includes("Michel");
+  
+  if (isInssContext) {
+    // Passo 1: Idade e Tempo (se ainda não perguntou)
+    if (!lastBotMsg.includes("idade") && !lastBotMsg.includes("Gov.br")) {
+      return "Certo, Previdenciário (Dr. Michel). Para verificarmos seu direito, responda:\n\nQual a sua idade exata e quanto tempo (aproximado) de contribuição você possui?";
+    }
+    // Passo 2: Gov.br e Senha (Crucial)
+    if (lastBotMsg.includes("idade") && !lastBotMsg.includes("Gov.br")) {
+      return "Entendido. Para analisar seu extrato CNIS, precisamos saber:\n\nVocê possui acesso ao **Portal Meu INSS (Gov.br)**? Tem a senha atualizada ou precisa recuperar?";
+    }
+    // Passo 3: Histórico de Pedidos
+    if (lastBotMsg.includes("Gov.br") && !lastBotMsg.includes("negado")) {
+      return "Ok. Você já tentou fazer esse pedido sozinho antes? Teve algum benefício negado recentemente pelo INSS?";
+    }
+    // Fim INSS
+    if (lastBotMsg.includes("negado")) {
+      if (onToolCall) performHandover(history, lastUserText, "Dr. Michel Felix", onToolCall);
+      return "Perfeito. Coletei as informações iniciais. \n\nEstou gerando um relatório para o Dr. Michel com seus dados de acesso e histórico. A secretaria entrará em contato para a análise técnica dos documentos. Obrigada!";
+    }
+  }
+
+  // === FASE 2: ROTEIRO TRABALHISTA (DRA. LUANA) ===
+  const isLaborContext = lower.match(/(2|trabalh|empresa|patrão|demi)/) || lastBotMsg.includes("Trabalhista") || lastBotMsg.includes("Luana");
+
+  if (isLaborContext) {
+    if (!lastBotMsg.includes("empresa") && !lastBotMsg.includes("assinada")) {
+      return "Área Trabalhista (Dra. Luana). Vamos lá:\n\nVocê ainda está trabalhando na empresa ou já saiu? Se saiu, foi demitido ou pediu conta?";
+    }
+    if (lastBotMsg.includes("saiu") && !lastBotMsg.includes("assinada")) {
+      return "Certo. Sua carteira de trabalho era assinada corretamente? O valor do salário no contracheque era o real?";
+    }
+    if (lastBotMsg.includes("assinada") && !lastBotMsg.includes("provas")) {
+      return "Ponto importante: Você possui **provas** do que aconteceu? \n(Ex: Conversas de WhatsApp, áudios, testemunhas ou documentos da empresa)?";
+    }
+    // Fim Trabalhista
+    if (lastBotMsg.includes("provas")) {
+      if (onToolCall) performHandover(history, lastUserText, "Dra. Luana Castro", onToolCall);
+      return "Entendi. A questão das provas é fundamental. \n\nJá passei seu relato para a Dra. Luana. Vamos analisar a viabilidade da ação e te chamamos em breve.";
+    }
+  }
+
+  // === FASE 3: ROTEIRO FAMÍLIA (DRA. FLÁVIA) ===
+  const isFamilyContext = lower.match(/(3|família|divórcio|separação|pensão)/) || lastBotMsg.includes("Família") || lastBotMsg.includes("Flávia");
+
+  if (isFamilyContext) {
+    if (!lastBotMsg.includes("filhos") && !lastBotMsg.includes("bens")) {
+      return "Área de Família (Dra. Flávia). \n\nPrimeiro: Existem filhos menores de idade envolvidos? Se sim, qual a idade deles?";
+    }
+    if (lastBotMsg.includes("filhos") && !lastBotMsg.includes("bens")) {
+      return "Ok. Existem bens a serem partilhados (Casa, carro, terrenos) ou dívidas em comum?";
+    }
+    if (lastBotMsg.includes("bens") && !lastBotMsg.includes("acordo")) {
+      return "Última pergunta importante: Existe possibilidade de **acordo** (consenso) com a outra parte, ou está havendo briga (litígio)?";
+    }
+    // Fim Família
+    if (lastBotMsg.includes("acordo")) {
+      if (onToolCall) performHandover(history, lastUserText, "Dra. Flávia Zacarias", onToolCall);
+      return "Certo, isso muda a estratégia. \n\nPreparei o resumo do caso para a Dra. Flávia. Ela vai analisar se cabe uma mediação ou ação judicial. Aguarde nosso contato!";
+    }
+  }
+
+  // === FALLBACK GENÉRICO (Se perder o fio da meada) ===
+  return "Entendi. Para que eu possa preparar o relatório para o advogado, você poderia me dar mais detalhes sobre documentos ou provas que você já possui?";
+};
+
+// Helper para finalizar o atendimento no modo nativo
+const performHandover = (history: Message[], lastText: string, lawyer: string, onToolCall: (t: any) => void) => {
+  const fullSummary = history.filter(m => m.role === 'user').map(m => m.content).join(" | ") + " | " + lastText;
+  onToolCall({
+    name: 'notificar_equipe',
+    args: {
+      clientName: 'Cliente (Triagem Completa)',
+      summary: `TRIAGEM AUTOMÁTICA:\n${fullSummary}`,
+      lawyerName: lawyer,
+      priority: 'Alta'
+    }
+  });
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
@@ -155,16 +205,16 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   let apiKeys = getAvailableApiKeys();
-  // Se não houver chaves, vai direto para o modo nativo
+  
+  // MODO 1: Se não tiver chaves, usa IA Nativa direto
   if (apiKeys.length === 0) {
     return runNativeMara(history, newMessage.text || "", onToolCall);
   }
 
   apiKeys = shuffleArray(apiKeys);
   const modelsToTry = MODEL_CANDIDATES;
-  const recentHistory = history.slice(-6); 
+  const recentHistory = history.slice(-8); // Aumentei o contexto para 8 para caber a entrevista
   
-  // Prepara conteúdo
   const chatHistory: Content[] = recentHistory
     .filter(m => m.role !== 'system' && !m.content.includes('⚠️'))
     .map(m => ({
@@ -184,7 +234,7 @@ export const sendMessageToGemini = async (
   const textToSend = newMessage.text || "(Áudio)";
   if (newMessage.text) currentParts.push({ text: newMessage.text });
 
-  // TENTA USAR A API
+  // MODO 2: Tenta API do Google
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
 
@@ -192,11 +242,20 @@ export const sendMessageToGemini = async (
         try {
             const chat = ai.chats.create({
                 model: model,
-                config: { systemInstruction, tools, thinkingConfig: { thinkingBudget: 0 } },
+                config: { 
+                  systemInstruction, // Usa o novo prompt detalhado
+                  tools, 
+                  thinkingConfig: { thinkingBudget: 0 } 
+                },
                 history: chatHistory
             });
 
-            const result = await chat.sendMessage({ message: currentParts });
+            // Timeout de 10 segundos (aumentei um pouco pois a resposta agora é mais complexa)
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000));
+            const apiPromise = chat.sendMessage({ message: currentParts });
+
+            const result: any = await Promise.race([apiPromise, timeoutPromise]);
+            
             let responseText = result.text || "";
 
             if (result.functionCalls && result.functionCalls.length > 0) {
@@ -211,14 +270,12 @@ export const sendMessageToGemini = async (
             return responseText;
 
         } catch (error: any) {
-            // Continua tentando silenciosamente...
             const isQuota = error.message?.includes('429') || error.message?.includes('Quota');
-            if (isQuota) break; // Troca de chave
+            if (isQuota) break; 
         }
     }
   }
 
-  // SE TUDO FALHAR (API DOWN, COTA, ETC), USA A IA NATIVA
-  // Isso garante que o usuário NUNCA veja um erro.
+  // MODO 3: FALLBACK TOTAL (IA Nativa com Checklist)
   return runNativeMara(history, textToSend, onToolCall);
 };
