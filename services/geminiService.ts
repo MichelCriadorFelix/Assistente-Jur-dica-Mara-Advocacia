@@ -3,11 +3,12 @@ import { Message, TeamMember } from "../types";
 import { DEFAULT_TEAM } from "../constants";
 
 // LISTA DE MODELOS (ORDEM DE PRIORIDADE)
+// Priorizamos modelos com melhor raciocínio e janelas de contexto
 const MODEL_CANDIDATES = [
-  'gemini-1.5-flash',          
-  'gemini-1.5-flash-latest',   
-  'gemini-2.0-flash-exp',
-  'gemini-1.5-pro'      
+  'gemini-1.5-pro',            // Melhor raciocínio
+  'gemini-1.5-flash',          // Mais rápido
+  'gemini-2.0-flash-exp',      // Experimental rápido
+  'gemini-1.5-flash-latest'
 ];
 
 const cleanKey = (key: string | undefined): string => {
@@ -68,12 +69,12 @@ export const getAvailableApiKeys = (): string[] => {
 
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
-  description: 'Notifica o advogado responsável com o relatório completo e estruturado.',
+  description: 'Notifica o advogado responsável quando a triagem estiver completa e tiver informações suficientes.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       clientName: { type: Type.STRING },
-      summary: { type: Type.STRING, description: "Resumo detalhado do caso, documentos que possui e histórico." },
+      summary: { type: Type.STRING, description: "Resumo detalhado do caso e documentos que o cliente informou ter." },
       lawyerName: { type: Type.STRING },
       priority: { type: Type.STRING }
     },
@@ -83,180 +84,9 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
-// --- CÉREBRO NATIVO (INTELIGÊNCIA DE CONTINGÊNCIA) ---
-// Atualizado para evitar Loop Infinito e respeitar contexto atual
-
-interface ConversationState {
-  area: 'INSS_GERAL' | 'INSS_DOENCA' | 'INSS_BPC' | 'TRABALHISTA' | 'FAMILIA' | 'UNKNOWN';
-  hasName: boolean;
-  hasDocsInfo: boolean;
-  hasSystemAccess: boolean;
-  userName: string | null;
-  honorific: string;
-  isQuestioning: boolean;
-  lastIntent: string; // Captura a intenção IMEDIATA da última mensagem
-}
-
-const analyzeHistory = (history: Message[], currentText: string): ConversationState => {
-  const fullText = history.filter(m => m.role === 'user').map(m => m.content).join(' ');
-  const lowerHistory = fullText.toLowerCase();
-  const lowerCurrent = currentText.toLowerCase(); // Prioridade máxima
-
-  const state: ConversationState = {
-    area: 'UNKNOWN',
-    hasName: false,
-    hasDocsInfo: false,
-    hasSystemAccess: false,
-    userName: null,
-    honorific: '',
-    isQuestioning: false,
-    lastIntent: ''
-  };
-
-  // 1. Detecção de Dúvida
-  if (lowerCurrent.match(/(o que é|como funciona|pra que serve|tenho direito|não entendi|explica|dúvida|que senha|que isso)/)) {
-    state.isQuestioning = true;
-  }
-
-  // 2. Detecção de Nome
-  const nameMatch = (fullText + " " + currentText).match(/(?:sou|chamo|nome é|aqui é|fala o|fala a)\s+([A-Z][a-zà-ú]+)/);
-  if (nameMatch) {
-    state.userName = nameMatch[1];
-    state.hasName = true;
-    if (state.userName.endsWith('a') || state.userName.endsWith('e')) state.honorific = 'Sra.';
-    else state.honorific = 'Sr.';
-  }
-
-  // 3. Detecção de Área (COM PRIORIDADE NO ATUAL)
-  // Se a mensagem atual falar explicitamente de doença, sobrescreve histórico de aposentadoria
-  if (lowerCurrent.match(/(doen[çc]a|laudo|médico|encostad|doente|dor|cirurgia|incapaz|auxílio)/)) {
-      state.area = 'INSS_DOENCA';
-      state.lastIntent = 'health';
-  } 
-  else if (lowerCurrent.match(/(não quero aposent|não é aposent)/)) {
-      // Negação explícita
-      if (lowerCurrent.match(/doen/)) state.area = 'INSS_DOENCA';
-      else state.area = 'UNKNOWN'; // Reset para perguntar de novo
-  }
-  else if (lowerCurrent.match(/(trabalh|patrão|empresa|demi|verba|fgts|botar no pau)/)) {
-      state.area = 'TRABALHISTA';
-  }
-  else if (lowerCurrent.match(/(família|divórcio|separação|pensão|guarda)/)) {
-      state.area = 'FAMILIA';
-  }
-  // Se o atual for neutro (ex: "tenho sim"), olha o histórico
-  else if (lowerHistory.match(/(doen[çc]a|laudo|médico|encostad)/)) state.area = 'INSS_DOENCA';
-  else if (lowerHistory.match(/(loas|bpc|idoso sem renda)/)) state.area = 'INSS_BPC';
-  else if (lowerHistory.match(/(inss|aposenta|tempo|contribui|cnis)/)) state.area = 'INSS_GERAL';
-  else if (lowerHistory.match(/(trabalh|patrão)/)) state.area = 'TRABALHISTA';
-
-  // 4. Detecção de Documentos
-  const combined = lowerHistory + " " + lowerCurrent;
-  if (combined.match(/(senha|gov\.br|meu inss|laudo|carteira|papel|documento|rg|cpf|certidão|tenho sim|possuo)/)) state.hasDocsInfo = true;
-  if (combined.match(/(já tentei|negado|advogado antes|nunca|primeira vez|site|sistema)/)) state.hasSystemAccess = true;
-
-  return state;
-};
-
-const runNativeMara = async (
-  history: Message[], 
-  lastUserText: string,
-  onToolCall?: (toolCall: any) => void,
-  caseContext?: string
-): Promise<string> => {
-  console.log("[Mara Native] Cérebro Lógico Ativado...");
-  
-  const lower = lastUserText.toLowerCase().trim();
-  const state = analyzeHistory(history, lastUserText);
-  const treatment = state.userName ? `${state.honorific} ${state.userName}` : "Sr(a).";
-
-  // FASE 0: Educação (Responder Dúvidas)
-  if (state.isQuestioning) {
-     if (lower.includes('senha') || lower.includes('gov')) {
-        return `Boa pergunta, ${treatment}. A senha do Gov.br é sua identidade digital. Precisamos dela para acessar o sistema do INSS e ver seu histórico (CNIS) ou agendar perícias. O Sr(a). sabe se tem essa senha ativa?`;
-     }
-     if (lower.includes('laudo')) {
-        return `O laudo médico é o documento que o doutor entrega explicando sua doença. Para o INSS, ele precisa ser recente e ter o código da doença (CID). O Sr(a). tem algum papel assim dos seus médicos?`;
-     }
-     return `Entendo sua dúvida, ${treatment}. Vou pedir para o advogado te explicar isso em detalhes. Mas antes, para eu deixar tudo pronto: Você tem os documentos básicos do seu caso aí?`;
-  }
-
-  // FASE 1: Identificação
-  if (!state.hasName && history.length < 3 && !lower.match(/(nome|chamo|sou)/)) {
-     return "Olá! Sou a Mara, assistente jurídica da Felix e Castro Advocacia. ⚖️\n\nPara eu iniciar seu atendimento, qual é o seu nome, por favor?";
-  }
-
-  // FASE 2: Entendimento do Caso (Se já temos nome, mas não sabemos a área ou detalhes)
-  if (state.area === 'UNKNOWN') {
-      return `Obrigada, ${treatment}. \n\nPara eu chamar o especialista correto, me conte um pouco mais: É sobre problemas de Saúde (INSS), Aposentadoria, Trabalho ou Família?`;
-  }
-
-  // FASE 3: Análise de Direito e Documentos
-
-  // --- INSS DOENÇA/INCAPACIDADE ---
-  if (state.area === 'INSS_DOENCA') {
-      if (!state.hasDocsInfo) {
-          return `Entendi, é uma questão de saúde. Sinto muito, ${treatment}. \n\nPara o Auxílio-Doença, os laudos são a parte mais importante. O Sr(a). tem laudos médicos recentes e a senha do 'Meu INSS' (Gov.br)?`;
-      }
-      // FASE 5: Fechamento
-      if (onToolCall) performHandover(history, lastUserText, "Dr. Michel Felix", onToolCall);
-      return `Perfeito, ${treatment}. Anotei tudo sobre os laudos e documentos. \n\nJá estou enviando seu relatório de prioridade para o Dr. Michel. A Fabrícia vai entrar em contato para agendar a análise.`;
-  }
-
-  // --- INSS GERAL (APOSENTADORIA) ---
-  if (state.area === 'INSS_GERAL') {
-      // Se caiu aqui mas a mensagem atual diz "não", tenta recuperar
-      if (lower.includes('não') && lower.includes('aposenta')) {
-         return `Ah, entendi! Peço desculpas. Se não é aposentadoria, qual seria o benefício? Auxílio-doença, BPC (Loas) ou Pensão?`;
-      }
-
-      if (!state.hasDocsInfo) {
-          return `Compreendo, ${treatment}. Para calcularmos sua aposentadoria, o acesso ao CNIS é vital. \n\nO Sr(a). possui a senha do Gov.br (Meu INSS) e a Carteira de Trabalho em mãos?`;
-      }
-      // FASE 5: Fechamento
-      if (onToolCall) performHandover(history, lastUserText, "Dr. Michel Felix", onToolCall);
-      return `Ótimo, ${treatment}. Com a senha e a carteira, o Dr. Michel consegue fazer o Planejamento Previdenciário. Já repassei seu caso e a Fabrícia vai te chamar.`;
-  }
-
-  // --- TRABALHISTA ---
-  if (state.area === 'TRABALHISTA') {
-      if (!state.hasDocsInfo) {
-          return `Entendido, ${treatment}. \n\nPara a Dra. Luana ver seus direitos: O Sr(a). tem provas do ocorrido (conversas, fotos) ou o contrato de trabalho? Ainda está na empresa ou já saiu?`;
-      }
-      if (onToolCall) performHandover(history, lastUserText, "Dra. Luana Castro", onToolCall);
-      return `Certo, ${treatment}. Situações trabalhistas têm prazo curto. Já notifiquei a Dra. Luana com seu relato. Aguarde nosso contato breve.`;
-  }
-
-  // --- FAMÍLIA ---
-  if (state.area === 'FAMILIA') {
-      if (!state.hasDocsInfo) {
-          return `Certo, ${treatment}. A Dra. Flávia cuida disso. \n\nTem filhos menores envolvidos ou bens para partilhar?`;
-      }
-      if (onToolCall) performHandover(history, lastUserText, "Dra. Flávia Zacarias", onToolCall);
-      return `Entendi. Assuntos de família exigem discrição. Já passei seu caso para a Dra. Flávia analisar.`;
-  }
-
-  // Fallback Genérico
-  if (history.length > 8) {
-      if (onToolCall) performHandover(history, lastUserText, "Advogado Responsável", onToolCall);
-      return `Entendi o contexto, ${treatment}. \n\nJá compilei as informações e passei para o advogado especialista. Entraremos em contato em breve!`;
-  }
-
-  return `Entendi, ${treatment}. Pode me dar mais alguns detalhes? Estou ouvindo.`;
-};
-
-// Helper para finalizar o atendimento no modo nativo
-const performHandover = (history: Message[], lastText: string, lawyer: string, onToolCall: (t: any) => void) => {
-  const fullSummary = history.filter(m => m.role === 'user').map(m => m.content).join(" | ") + " | " + lastText;
-  onToolCall({
-    name: 'notificar_equipe',
-    args: {
-      clientName: 'Cliente (Via Chat)',
-      summary: `RELATÓRIO NATIVO: ${fullSummary}`,
-      lawyerName: lawyer,
-      priority: 'Alta'
-    }
-  });
+// --- FALLBACK SIMPLES (QUANDO NÃO HÁ CONEXÃO MESMO) ---
+const simpleFallback = (text: string): string => {
+  return "Desculpe, estou com uma instabilidade momentânea na minha conexão com o sistema inteligente. Poderia repetir ou enviar em texto se foi áudio? Se preferir, posso pedir para a secretária te ligar.";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
@@ -284,13 +114,16 @@ export const sendMessageToGemini = async (
   
   let apiKeys = getAvailableApiKeys();
   
+  // Se não tem chave, cai no fallback imediatamente
   if (apiKeys.length === 0) {
-    return runNativeMara(history, newMessage.text || "", onToolCall, caseContext);
+    return "⚠️ ERRO DE SISTEMA: Nenhuma chave de API configurada. Por favor, avise o administrador.";
   }
 
   apiKeys = shuffleArray(apiKeys);
   const modelsToTry = MODEL_CANDIDATES;
-  const recentHistory = history.slice(-10); 
+  
+  // Limita histórico para evitar sobrecarga de tokens, mas mantém contexto suficiente
+  const recentHistory = history.slice(-15); 
   
   // INJEÇÃO DINÂMICA DE CONTEXTO
   let dynamicPrompt = systemInstruction;
@@ -300,78 +133,95 @@ export const sendMessageToGemini = async (
      const savedTeam = localStorage.getItem('mara_team_config');
      const team: TeamMember[] = savedTeam ? JSON.parse(savedTeam) : DEFAULT_TEAM;
      const teamList = team.map(t => `- ${t.name} (${t.role})`).join('\n');
-     dynamicPrompt += `\n\n### 👥 EQUIPE ATUAL DO ESCRITÓRIO:\n${teamList}\nUse estes nomes para direcionar o cliente.`;
+     dynamicPrompt += `\n\n### 👥 EQUIPE DO ESCRITÓRIO:\n${teamList}`;
   } catch(e) {}
 
-  // 2. Injeta Status do Caso (Prontuário)
+  // 2. Injeta Status do Caso
   if (caseContext && caseContext.length > 5) {
-     dynamicPrompt += `\n\n### 📂 PRONTUÁRIO/STATUS ATUAL DO CLIENTE (MUITO IMPORTANTE):\nO advogado deixou a seguinte nota sobre o andamento deste caso:\n"${caseContext}"\n\nSE O CLIENTE PERGUNTAR SOBRE ANDAMENTO, DATA DE PERÍCIA OU STATUS, USE ESTA INFORMAÇÃO PARA RESPONDER. SEJA CLARO E TRANQUILIZE O CLIENTE.`;
+     dynamicPrompt += `\n\n### 📂 INFO DO SISTEMA SOBRE ESTE CLIENTE:\n"${caseContext}"\n(Use isso se ele perguntar do processo).`;
   }
 
-  // 3. TRUQUE DE ÁUDIO E FONÉTICA: Instrução robusta para erros comuns
-  if (newMessage.audioBase64) {
-    dynamicPrompt += `\n\n### 🎤 INSTRUÇÃO DE ÁUDIO CRÍTICA:\nO usuário enviou um áudio. Você DEVE ouvir, transcrever internamente e analisar o conteúdo.\n\n⚠️ CORREÇÃO FONÉTICA OBRIGATÓRIA:\nSe ouvir "Mio INSS" -> Entenda "Meu INSS".\nSe ouvir "Qnis" -> Entenda "CNIS".\nSe ouvir "Encostado" -> Entenda "Auxílio-Doença".\nSe ouvir "Loas" -> Entenda "BPC".\n\nNão mencione que corrigiu o termo, apenas responda com o termo jurídico correto.`;
-  }
-
+  // Prepara histórico no formato do Gemini SDK
   const chatHistory: Content[] = recentHistory
-    .filter(m => m.role !== 'system' && !m.content.includes('⚠️'))
+    .filter(m => m.role !== 'system')
     .map(m => ({
       role: m.role,
-      parts: [{ text: m.type === 'audio' ? '(Áudio do usuário)' : m.content }]
+      parts: [{ text: m.type === 'audio' ? '(Áudio do usuário - responda ao conteúdo transcrito)' : m.content }]
     }));
 
+  // Monta a mensagem atual (Texto + Áudio se houver)
   const currentParts: Part[] = [];
+  
   if (newMessage.audioBase64) {
+    // IMPORTANTE: Envia o áudio como parte inlineData
     currentParts.push({
       inlineData: {
-        mimeType: newMessage.mimeType || 'audio/webm;codecs=opus', // Fallback seguro
+        mimeType: newMessage.mimeType || 'audio/webm',
         data: newMessage.audioBase64
       }
     });
+    // Adiciona dica de texto para garantir que o modelo saiba o que fazer
+    if (!newMessage.text) {
+        currentParts.push({ text: "Por favor, ouça este áudio atentamente, transcreva mentalmente o que o cliente disse e responda como a Mara Advogada." });
+    }
   }
-  const textToSend = newMessage.text || "(Áudio enviado)";
-  if (newMessage.text) currentParts.push({ text: newMessage.text });
+  
+  if (newMessage.text) {
+    currentParts.push({ text: newMessage.text });
+  }
 
-  // MODO 2: Tenta API do Google
+  // Tenta conectar usando as chaves disponíveis
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
 
     for (const model of modelsToTry) {
         try {
+            console.log(`[Mara] Tentando modelo ${model}...`);
             const chat = ai.chats.create({
                 model: model,
                 config: { 
                   systemInstruction: dynamicPrompt,
                   tools, 
-                  thinkingConfig: { thinkingBudget: 0 } 
+                  // Removido thinkingConfig para evitar incompatibilidade
+                  temperature: 0.7, // Criatividade moderada para ser natural
                 },
                 history: chatHistory
             });
 
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 12000));
+            // Timeout de segurança
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 20000));
+            
             const apiPromise = chat.sendMessage({ message: currentParts });
-
             const result: any = await Promise.race([apiPromise, timeoutPromise]);
             
             let responseText = result.text || "";
 
+            // Processa chamada de ferramenta (Tool Calling)
             if (result.functionCalls && result.functionCalls.length > 0) {
                 const call = result.functionCalls[0];
+                console.log("[Mara] Tool Call:", call.name);
+                
                 if (onToolCall) onToolCall({ name: call.name, args: call.args });
+                
+                // Retorna confirmação para a IA finalizar a frase
                 const fnResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Success" } } }]
                 });
                 responseText = fnResp.text || "";
             }
             
+            if (!responseText) throw new Error("Resposta vazia da IA");
+            
             return responseText;
 
         } catch (error: any) {
+            console.warn(`[Mara] Erro com modelo ${model}:`, error.message);
             const isQuota = error.message?.includes('429') || error.message?.includes('Quota');
+            // Se for cota, tenta outra chave. Se for outro erro, tenta outro modelo.
             if (isQuota) break; 
         }
     }
   }
 
-  return runNativeMara(history, textToSend, onToolCall, caseContext);
+  return simpleFallback(newMessage.text || "");
 };
