@@ -1,4 +1,4 @@
-import { GoogleGenAI, FunctionDeclaration, Type, Tool } from "@google/genai";
+import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
 // Setup API Key - assumes process.env.API_KEY is available
@@ -48,7 +48,7 @@ export const sendMessageToGemini = async (
 
   // Convert internal Message format to Gemini Content format
   // We filter out system messages from history as they go into config
-  const chatHistory = history
+  const chatHistory: Content[] = history
     .filter(m => m.role !== 'system')
     .map(m => ({
       role: m.role,
@@ -57,10 +57,11 @@ export const sendMessageToGemini = async (
         : [{ text: '[Áudio enviado pelo usuário]' }] // Simplified for history context
     }));
 
-  const parts: any[] = [];
+  // Create the parts for the new message
+  const currentParts: Part[] = [];
   
   if (newMessage.audioBase64) {
-    parts.push({
+    currentParts.push({
       inlineData: {
         mimeType: newMessage.mimeType || 'audio/webm;codecs=opus',
         data: newMessage.audioBase64
@@ -69,28 +70,31 @@ export const sendMessageToGemini = async (
   }
   
   if (newMessage.text) {
-    parts.push({ text: newMessage.text });
+    currentParts.push({ text: newMessage.text });
   }
 
   try {
-    const model = ai.models.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
-      systemInstruction: systemInstruction,
-      tools: tools,
+    // Initialize Chat with Gemini 2.5 Flash
+    // Using the new SDK 'ai.chats.create' pattern
+    const chat = ai.chats.create({
+      model: 'gemini-2.5-flash-preview',
+      config: {
+        systemInstruction: systemInstruction,
+        tools: tools,
+      },
+      history: chatHistory
     });
 
-    const chat = model.startChat({
-      history: chatHistory,
+    // Send the message
+    const result = await chat.sendMessage({
+      message: currentParts
     });
-
-    const result = await chat.sendMessage(parts);
-    const response = result.response;
     
-    // Handle Function Calls
-    const functionCalls = response.functionCalls();
+    const response = result; // result is GenerateContentResponse in new SDK
     
-    if (functionCalls && functionCalls.length > 0) {
-      const call = functionCalls[0];
+    // Handle Function Calls (property access, not method)
+    if (response.functionCalls && response.functionCalls.length > 0) {
+      const call = response.functionCalls[0];
       
       // Notify UI about the tool usage (simulated)
       if (onToolCall) {
@@ -102,18 +106,20 @@ export const sendMessageToGemini = async (
         result: "Sucesso. A equipe foi notificada e o CRM atualizado com o lead."
       };
 
-      // Send the tool execution result back to the model to get the final natural language response
-      const finalResult = await chat.sendMessage([{
-        functionResponse: {
-          name: call.name,
-          response: functionResponse
-        }
-      }]);
+      // Send the tool execution result back to the model
+      const finalResult = await chat.sendMessage({
+        message: [{
+          functionResponse: {
+            name: call.name,
+            response: functionResponse
+          }
+        }]
+      });
 
-      return finalResult.response.text();
+      return finalResult.text || "";
     }
 
-    return response.text();
+    return response.text || "";
 
   } catch (error) {
     console.error("Gemini API Error:", error);
