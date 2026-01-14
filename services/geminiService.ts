@@ -1,10 +1,6 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// IMPORTANTE: Removemos chaves hardcoded para evitar erro de "Key Leaked".
-// O sistema deve depender exclusivamente das chaves do usuário (LocalStorage) ou Vercel.
-const BACKUP_KEYS: string[] = [];
-
 // Helper para pegar o modelo configurado ou usar o padrão
 const getModelName = (): string => {
   if (typeof window !== 'undefined') {
@@ -14,46 +10,29 @@ const getModelName = (): string => {
   return 'gemini-2.0-flash';
 };
 
-// Helper para coletar TODAS as chaves disponíveis no ambiente
+// Helper para coletar chaves. 
+// ATENÇÃO: Se não houver chave no LocalStorage, o sistema não funcionará pois as chaves públicas foram revogadas.
 const getAvailableApiKeys = (): string[] => {
   const keys: string[] = [];
 
-  // 1. Local Storage (Definido pelo usuário na UI - Prioridade Máxima)
+  // 1. Local Storage (Prioridade: Chave do Usuário)
   if (typeof window !== 'undefined') {
     const localKey = localStorage.getItem('mara_gemini_api_key');
     if (localKey && localKey.trim().length > 0) keys.push(localKey.trim());
   }
 
-  // 2. Variáveis de Ambiente (Vercel / Build Time)
-  const possibleEnvKeys = [
-    // Next.js / Standard Node
-    process.env.API_KEY_3,
-    process.env.API_KEY_2,
-    process.env.API_KEY_1,
-    process.env.NEXT_PUBLIC_API_KEY_3,
-    process.env.NEXT_PUBLIC_API_KEY_2,
-    process.env.NEXT_PUBLIC_API_KEY_1,
-    
-    // Vite Prefix
-    (import.meta as any).env?.VITE_API_KEY_3,
-    (import.meta as any).env?.VITE_API_KEY_2,
-    (import.meta as any).env?.VITE_API_KEY_1,
+  // 2. Variáveis de Ambiente (Caso o usuário faça deploy na Vercel com suas chaves)
+  const envKeys = [
+    process.env.NEXT_PUBLIC_API_KEY,
+    process.env.VITE_API_KEY,
     (import.meta as any).env?.VITE_API_KEY,
     (import.meta as any).env?.NEXT_PUBLIC_API_KEY
   ];
 
-  possibleEnvKeys.forEach(k => {
-    if (k && typeof k === 'string' && k.length > 10) {
-      keys.push(k.trim());
-    }
+  envKeys.forEach(k => {
+    if (k && typeof k === 'string' && k.length > 20) keys.push(k.trim());
   });
 
-  // 3. Backups (Se houver)
-  BACKUP_KEYS.forEach(k => {
-    if (!keys.includes(k)) keys.push(k);
-  });
-
-  // Remove duplicatas e valores vazios
   return [...new Set(keys)].filter(k => !!k);
 };
 
@@ -84,11 +63,12 @@ export const sendMessageToGemini = async (
   const apiKeys = getAvailableApiKeys();
   const modelName = getModelName();
   
+  // Se não tiver chave nenhuma, avisa amigavelmente.
   if (apiKeys.length === 0) {
-    return "⚠️ Erro Crítico: Nenhuma chave de API válida encontrada. Por favor, adicione uma chave nas Configurações ou verifique as variáveis de ambiente da Vercel (prefixo VITE_ ou NEXT_PUBLIC_).";
+    return "⚠️ **Configuração Necessária**\n\nOlá! Para que eu possa funcionar, você precisa adicionar uma Chave de API (Google Gemini).\n\n1. Vá na aba **Configurações** aqui do painel.\n2. Clique em 'Gerar Chave Gratuita'.\n3. Cole a chave no campo indicado e salve.";
   }
 
-  console.log(`[Mara System] Iniciando processamento. ${apiKeys.length} chaves de API disponíveis.`);
+  console.log(`[Mara System] Usando ${apiKeys.length} chaves disponíveis.`);
 
   // Preparar o histórico
   const chatHistory: Content[] = history
@@ -113,17 +93,10 @@ export const sendMessageToGemini = async (
     currentParts.push({ text: newMessage.text });
   }
 
-  // === ROTAÇÃO DE CHAVES (LOAD BALANCER) ===
-  let lastError: any = null;
-  let attempts = 0;
-
+  // Tentar conectar com as chaves disponíveis
   for (const apiKey of apiKeys) {
-    attempts++;
     try {
-      console.log(`[Tentativa ${attempts}/${apiKeys.length}] Conectando com chave final ...${apiKey.slice(-4)}`);
-      
       const ai = new GoogleGenAI({ apiKey });
-
       const chat = ai.chats.create({
         model: modelName,
         config: { systemInstruction, tools },
@@ -131,63 +104,44 @@ export const sendMessageToGemini = async (
       });
 
       const result = await chat.sendMessage({ message: currentParts });
-      const response = result;
-
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        const call = response.functionCalls[0];
+      
+      // Checa chamadas de função (Tools)
+      if (result.functionCalls && result.functionCalls.length > 0) {
+        const call = result.functionCalls[0];
         if (onToolCall) onToolCall({ name: call.name, args: call.args });
-
-        const functionResponse = { result: "Sucesso. Equipe notificada." };
+        
+        // Responde para a IA confirmar
         const finalResult = await chat.sendMessage({
-          message: [{ functionResponse: { name: call.name, response: functionResponse } }]
+          message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
         });
         return finalResult.text || "";
       }
 
-      return response.text || "";
+      return result.text || "";
 
     } catch (error: any) {
-      lastError = error;
-      const errorMsg = error.message || JSON.stringify(error);
-      
-      // Erros de Cota (429) ou Exaustão
-      const isQuotaError = errorMsg.includes('429') || 
-                           errorMsg.includes('Quota') || 
-                           errorMsg.includes('Resource has been exhausted');
-      
-      // Erros de Chave Inválida/Vazada/Permissão (403)
-      // Se a chave vazou, temos que pular para a próxima imediatamente
-      const isKeyError = errorMsg.includes('403') || 
-                         errorMsg.includes('PERMISSION_DENIED') || 
-                         errorMsg.includes('leaked') ||
-                         errorMsg.includes('key expired') ||
-                         errorMsg.includes('not valid');
-      
-      if (isQuotaError || isKeyError) {
-        console.warn(`[Chave Falhou] Chave ...${apiKey.slice(-4)} rejeitada (Cota ou Permissão). Tentando próxima...`);
-        continue; // PULA para a próxima chave
-      }
+      const msg = error.message || '';
+      console.warn(`Erro na chave ...${apiKey.slice(-4)}:`, msg);
 
-      if (errorMsg.includes('404') || errorMsg.includes('not found')) {
-         return `⚠️ Erro de Configuração (404): O modelo '${modelName}' não foi encontrado. Vá em Configurações e mude para 'gemini-1.5-flash-8b'.`;
+      // Tratamento específico para chave vazada/banida
+      if (msg.includes('403') || msg.includes('PERMISSION_DENIED') || msg.includes('leaked')) {
+         // Se for a última chave e falhou, retorna erro legível
+         if (apiKeys.indexOf(apiKey) === apiKeys.length - 1) {
+             return "🚫 **Acesso Bloqueado**\n\nA chave de API configurada foi identificada como 'vazada' pelo Google e bloqueada.\n\nPor favor, vá em **Configurações**, remova a chave antiga e gere uma nova em *aistudio.google.com*.";
+         }
+         continue; // Tenta a próxima chave se houver
       }
-
-      console.warn(`[Erro Técnico Genérico] Falha na chave ...${apiKey.slice(-4)}:`, errorMsg);
-      // Tenta a próxima chave mesmo em erro genérico para garantir resiliência
-      continue;
+      
+      if (msg.includes('429')) {
+         return "⏳ **Alto Tráfego**\n\nEstou recebendo muitas solicitações. Por favor, aguarde 30 segundos e tente novamente.";
+      }
+      
+      // Se não for erro de chave/cota, pode ser modelo inexistente
+      if (msg.includes('404')) {
+         return `⚠️ **Erro de Modelo**\n\nO modelo '${modelName}' não está disponível para sua chave. Tente mudar para 'gemini-1.5-flash' nas Configurações.`;
+      }
     }
   }
-  
-  console.error("[FALHA TOTAL] Todas as chaves de API falharam.");
-  
-  // Tratamento de mensagem final para o usuário
-  if (lastError?.message?.includes('403') || lastError?.message?.includes('PERMISSION_DENIED')) {
-      return "⚠️ Erro de Autenticação: Todas as chaves de API fornecidas foram rejeitadas pelo Google (Vazamento ou Permissão). Verifique as Configurações.";
-  }
 
-  if (lastError?.message?.includes('429')) {
-    return "⚠️ Mara indisponível momentaneamente (Alto tráfego). Tente novamente em 1 minuto.";
-  }
-
-  return `⚠️ Erro Técnico: ${lastError?.message || 'Falha na conexão com IA'}`;
+  return "⚠️ **Erro de Conexão**\n\nNão consegui conectar ao servidor da IA. Verifique sua chave de API nas Configurações.";
 };
