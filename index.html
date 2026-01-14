@@ -29,7 +29,7 @@
       }
     </script>
     <script>
-      // Polyfill for process.env 
+      // Polyfill for process.env to avoid crashes if accessed directly
       window.process = {
         env: {
           NODE_ENV: 'development',

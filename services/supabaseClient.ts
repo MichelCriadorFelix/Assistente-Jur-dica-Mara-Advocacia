@@ -1,57 +1,53 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Helper to safely get env vars across different environments (Vite, Next.js, CRA)
-const getEnvVar = (key: string, prefixlessKey?: string) => {
-  // 1. Try Vite's import.meta.env
-  // Fix TS error: Property 'env' does not exist on type 'ImportMeta'
-  const metaEnv = (import.meta as any).env;
-  
-  if (typeof import.meta !== 'undefined' && metaEnv) {
-    // Check specific key
-    if (metaEnv[key]) return metaEnv[key];
-    // Check VITE_ prefix version if looking for generic
-    if (prefixlessKey && metaEnv[`VITE_${prefixlessKey}`]) return metaEnv[`VITE_${prefixlessKey}`];
-  }
+// Helper function to safely read environment variables across different build systems (Vite, Next, Create React App)
+const getEnvVar = (key: string, prefixlessKey?: string): string | undefined => {
+  let value: string | undefined;
 
-  // 2. Try process.env (Node/Next.js/CRA)
+  // 1. Try standard process.env (Next.js / CRA / Node)
   if (typeof process !== 'undefined' && process.env) {
-    if (process.env[key]) return process.env[key];
-    if (prefixlessKey) {
-       // Check common prefixes
-       if (process.env[`NEXT_PUBLIC_${prefixlessKey}`]) return process.env[`NEXT_PUBLIC_${prefixlessKey}`];
-       if (process.env[`REACT_APP_${prefixlessKey}`]) return process.env[`REACT_APP_${prefixlessKey}`];
-       if (process.env[`VITE_${prefixlessKey}`]) return process.env[`VITE_${prefixlessKey}`];
+    if (process.env[key]) value = process.env[key];
+    // Check common prefixes if direct key fails
+    if (!value && prefixlessKey) {
+      if (process.env[`NEXT_PUBLIC_${prefixlessKey}`]) value = process.env[`NEXT_PUBLIC_${prefixlessKey}`];
+      else if (process.env[`VITE_${prefixlessKey}`]) value = process.env[`VITE_${prefixlessKey}`];
+      else if (process.env[`REACT_APP_${prefixlessKey}`]) value = process.env[`REACT_APP_${prefixlessKey}`];
     }
   }
-  
-  return undefined;
+
+  // 2. Try Vite's import.meta.env (if process.env failed)
+  if (!value && typeof import.meta !== 'undefined') {
+    const metaEnv = (import.meta as any).env;
+    if (metaEnv) {
+      if (metaEnv[key]) value = metaEnv[key];
+      if (!value && prefixlessKey) {
+        if (metaEnv[`VITE_${prefixlessKey}`]) value = metaEnv[`VITE_${prefixlessKey}`];
+        else if (metaEnv[`NEXT_PUBLIC_${prefixlessKey}`]) value = metaEnv[`NEXT_PUBLIC_${prefixlessKey}`];
+      }
+    }
+  }
+
+  return value;
 };
 
-// Attempt to find the URL and Key using various naming conventions
+// Specifically look for the variables shown in your Vercel screenshots
 const supabaseUrl = 
-  getEnvVar('NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL') || 
-  getEnvVar('VITE_SUPABASE_URL') || 
-  getEnvVar('REACT_APP_SUPABASE_URL');
+  getEnvVar('NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL');
 
 const supabaseAnonKey = 
-  getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY') || 
-  getEnvVar('VITE_SUPABASE_ANON_KEY') || 
-  getEnvVar('REACT_APP_SUPABASE_ANON_KEY');
+  getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY') ||
+  getEnvVar('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'); // Alternative name often used
 
-// Log guidance if missing
+// Fallback values to prevent "supabaseUrl is required" crash
+// This allows the app to load visually even if DB connection fails, showing logs instead of white screen.
+const finalUrl = supabaseUrl || 'https://placeholder.supabase.co';
+const finalKey = supabaseAnonKey || 'placeholder';
+
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error(
-    "%c[Supabase] Erro Crítico: Credenciais não encontradas.", 
-    "color: red; font-weight: bold; font-size: 14px"
-  );
   console.warn(
-    "DICA DE IMPLANTAÇÃO: Se estiver usando Vercel com Vite, renomeie suas variáveis de ambiente para começar com 'VITE_'. Ex: 'VITE_SUPABASE_URL'."
+    "%c[Supabase Warning] Credenciais não encontradas. Verifique se 'NEXT_PUBLIC_SUPABASE_URL' está definido na Vercel.", 
+    "color: orange; font-weight: bold;"
   );
 }
 
-// Prevent app crash by using fallback if keys are missing
-// This allows the UI to load (even if DB calls fail later)
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder-project.supabase.co', 
-  supabaseAnonKey || 'placeholder-key'
-);
+export const supabase = createClient(finalUrl, finalKey);

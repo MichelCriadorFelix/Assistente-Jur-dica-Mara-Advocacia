@@ -37,7 +37,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
              id: 'init', role: 'model', content: 'Olá! Sou a Mara, assistente virtual da Justiça & Associados. Como posso ajudar você hoje?', type: 'text', timestamp: new Date()
            };
            setMessages([initialMsg]);
-           // We don't save the initial hardcoded message to DB to save space, but you could.
         }
       } catch (e) {
         console.error("Failed to init chat session", e);

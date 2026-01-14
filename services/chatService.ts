@@ -39,24 +39,32 @@ export const chatService = {
     }]).select().single();
 
     if (error) {
+        // Fallback for "offline" or configured incorrectly mode
         console.error("Error creating contact", error);
-        throw error;
+        return 'temp-id-' + Date.now();
     }
     return data.id;
   },
 
   loadMessages: async (contactId: string): Promise<Message[]> => {
+    if (contactId.startsWith('temp-id')) return [];
+
     const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('contact_id', contactId)
       .order('created_at', { ascending: true });
     
-    if (error) throw error;
+    if (error) {
+        console.error("Error loading messages", error);
+        return [];
+    }
     return data.map(mapDbMessage);
   },
 
   saveMessage: async (contactId: string, message: Partial<Message>) => {
+    if (contactId.startsWith('temp-id')) return;
+
     // 1. Insert Message
     const { error: msgError } = await supabase.from('messages').insert([{
       contact_id: contactId,
@@ -72,11 +80,13 @@ export const chatService = {
     await supabase.from('contacts').update({
       last_message: message.type === 'audio' ? '🎵 Áudio' : message.content,
       updated_at: new Date().toISOString(),
-      unread_count: 0 // Reset if it's the user viewing, logic can be improved later
+      unread_count: 0 
     }).eq('id', contactId);
   },
 
   updateContactStatus: async (contactId: string, status: string, name?: string) => {
+     if (contactId.startsWith('temp-id')) return;
+
      const updateData: any = { status };
      if (name) updateData.name = name;
      

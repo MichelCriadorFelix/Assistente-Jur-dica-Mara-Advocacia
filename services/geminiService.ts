@@ -1,6 +1,28 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
+// Helper to safely get API Key supporting multiple naming conventions
+const getApiKey = () => {
+  if (typeof process !== 'undefined' && process.env) {
+    // Check the variable specifically seen in your screenshot: API_KEY_1
+    if (process.env.API_KEY_1) return process.env.API_KEY_1;
+    if (process.env.API_KEY) return process.env.API_KEY;
+    if (process.env.NEXT_PUBLIC_API_KEY) return process.env.NEXT_PUBLIC_API_KEY;
+  }
+  
+  // Try Vite/Import Meta
+  if (typeof import.meta !== 'undefined') {
+    const metaEnv = (import.meta as any).env;
+    if (metaEnv) {
+       if (metaEnv.API_KEY_1) return metaEnv.API_KEY_1;
+       if (metaEnv.VITE_API_KEY) return metaEnv.VITE_API_KEY;
+    }
+  }
+  return '';
+};
+
+const apiKey = getApiKey();
+
 // Function Declaration for notifying the team
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
@@ -37,14 +59,12 @@ export const sendMessageToGemini = async (
   systemInstruction: string,
   onToolCall?: (toolCall: any) => void
 ): Promise<string> => {
-  // Use process.env.API_KEY directly as per @google/genai guidelines.
-  // We assume process.env.API_KEY is available and configured.
-  if (!process.env.API_KEY) {
-    console.error("API Key do Gemini não encontrada. Verifique as variáveis de ambiente (API_KEY).");
-    return "Erro de configuração: Chave de API da IA não detectada. Por favor, contate o administrador do sistema.";
+  if (!apiKey) {
+    console.error("API Key (API_KEY ou API_KEY_1) não encontrada.");
+    return "Erro: Chave de API não configurada. Verifique o painel da Vercel (API_KEY_1).";
   }
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey });
 
   // Convert internal Message format to Gemini Content format
   const chatHistory: Content[] = history
