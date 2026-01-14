@@ -1,23 +1,21 @@
-import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, '.', '');
-    return {
-      server: {
-        port: 3000,
-        host: '0.0.0.0',
-      },
-      plugins: [react()],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
-      resolve: {
-        alias: {
-          '@': path.resolve(__dirname, '.'),
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    // Aumenta o limite do aviso para 1000kb (1MB) para silenciar o alerta na Vercel
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        // Força a separação das bibliotecas pesadas em arquivos distintos
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'lucide-react'],
+          'vendor-google': ['@google/genai'],
+          'vendor-supabase': ['@supabase/supabase-js']
         }
       }
-    };
+    }
+  }
 });

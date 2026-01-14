@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
-import LoginScreen from './components/LoginScreen';
-import ChatInterface from './components/ChatInterface';
-import DashboardLayout from './components/DashboardLayout';
-import DashboardStats from './components/DashboardStats';
-import ChatMonitor from './components/ChatMonitor';
-import SettingsScreen from './components/SettingsScreen';
+import React, { useState, Suspense, lazy } from 'react';
 import { ViewState, AppConfig } from './types';
 import { INITIAL_CONFIG } from './constants';
-import { Smartphone } from 'lucide-react';
+import { Smartphone, Loader2 } from 'lucide-react';
+
+// Lazy Loading: Carrega os componentes apenas quando necessários
+// Isso reduz drasticamente o tamanho do arquivo inicial (index.js)
+const LoginScreen = lazy(() => import('./components/LoginScreen'));
+const ChatInterface = lazy(() => import('./components/ChatInterface'));
+const DashboardLayout = lazy(() => import('./components/DashboardLayout'));
+const DashboardStats = lazy(() => import('./components/DashboardStats'));
+const ChatMonitor = lazy(() => import('./components/ChatMonitor'));
+const SettingsScreen = lazy(() => import('./components/SettingsScreen'));
 
 function App() {
   const [view, setView] = useState<ViewState>(ViewState.LOGIN);
@@ -66,9 +69,14 @@ function App() {
   };
 
   return (
-    <>
+    <Suspense fallback={
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-900 text-emerald-600">
+        <Loader2 className="w-12 h-12 animate-spin mb-4" />
+        <p className="text-sm font-medium text-gray-500 animate-pulse">Carregando sistema...</p>
+      </div>
+    }>
       {renderView()}
-    </>
+    </Suspense>
   );
 }
 
