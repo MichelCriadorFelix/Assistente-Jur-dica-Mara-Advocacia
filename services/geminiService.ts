@@ -1,6 +1,9 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
+// Chave fornecida pelo usuário para garantir funcionamento imediato
+const DEFAULT_FALLBACK_KEY = "AIzaSyAKn6TpoKlcyuLESez4GMSMeconldxfYNk";
+
 // Helper to get API Key dynamically at runtime
 const getApiKey = (): string => {
   // 1. First, check for manual override in Local Storage (set via Settings UI)
@@ -12,7 +15,7 @@ const getApiKey = (): string => {
   // 2. Check Vite specific (Priority for VITE_API_KEY_1 as requested)
   if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
     const env = (import.meta as any).env;
-    if (env.VITE_API_KEY_1) return env.VITE_API_KEY_1; // PRIORIDADE MÁXIMA
+    if (env.VITE_API_KEY_1) return env.VITE_API_KEY_1;
     if (env.VITE_API_KEY) return env.VITE_API_KEY;
     if (env.API_KEY_1) return env.API_KEY_1;
   }
@@ -26,7 +29,8 @@ const getApiKey = (): string => {
     if (process.env.API_KEY) return process.env.API_KEY;
   }
   
-  return '';
+  // 4. Fallback final para a chave fornecida explicitamente pelo usuário
+  return DEFAULT_FALLBACK_KEY;
 };
 
 // Function Declaration for notifying the team
@@ -71,7 +75,7 @@ export const sendMessageToGemini = async (
 
   if (!apiKey) {
     console.error("API Key não encontrada.");
-    return "⚠️ Erro de Configuração: Chave de API não encontrada.\n\nO sistema tentou ler 'VITE_API_KEY_1' mas retornou vazio. Verifique se a variável está exposta no ambiente (Environment Variables) ou insira manualmente nas configurações.";
+    return "⚠️ Erro de Configuração: Nenhuma chave de API detectada.";
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -102,9 +106,10 @@ export const sendMessageToGemini = async (
   }
 
   try {
-    // Usando modelo estável 'gemini-1.5-flash' para garantir compatibilidade
+    // Usando gemini-2.0-flash-exp (a versão mais recente e rápida disponível gratuitamente)
+    // Nota: 'gemini-2.5' ainda não é um endpoint público padrão para texto, usamos o 2.0 Flash que é o equivalente atual.
     const chat = ai.chats.create({
-      model: 'gemini-1.5-flash', 
+      model: 'gemini-2.0-flash-exp', 
       config: {
         systemInstruction: systemInstruction,
         tools: tools,
@@ -146,18 +151,28 @@ export const sendMessageToGemini = async (
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     
-    // Tratamento de erros detalhado para debug
     let errorMsg = error.message || JSON.stringify(error);
     
+    // Fallback para 1.5 Flash se o 2.0 Experimental falhar (ex: instabilidade)
+    if (errorMsg.includes('404') || errorMsg.includes('not found')) {
+        console.warn("Gemini 2.0 Flash not found, trying fallback to 1.5 Flash");
+        try {
+            const fallbackChat = ai.chats.create({
+                model: 'gemini-1.5-flash',
+                config: { systemInstruction, tools },
+                history: chatHistory
+            });
+            const fallbackResult = await fallbackChat.sendMessage({ message: currentParts });
+            return fallbackResult.text || "";
+        } catch (fallbackError: any) {
+            return `⚠️ Erro Técnico (Fallback): ${fallbackError.message}`;
+        }
+    }
+
     if (errorMsg.includes('403') || errorMsg.includes('API key')) {
          return `🔒 Erro de Permissão (403): Chave inválida ou sem acesso.`;
     }
-    
-    if (errorMsg.includes('404') || errorMsg.includes('not found')) {
-         return `❌ Modelo não encontrado (404). O 'gemini-1.5-flash' deve funcionar.`;
-    }
 
-    // Retorna o erro real para o usuário ver o que aconteceu
     return `⚠️ Erro Técnico: ${errorMsg}`;
   }
 };
