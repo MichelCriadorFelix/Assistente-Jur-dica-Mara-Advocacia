@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Message, Contact, AppConfig } from '../types';
-import { Search, Bot, User, RefreshCw, Key, Save } from 'lucide-react';
+import { Search, Bot, User, RefreshCw, Key, Save, Database } from 'lucide-react';
 import { chatService } from '../services/chatService';
+import { isSupabaseConfigured } from '../services/supabaseClient';
 
 interface ChatMonitorProps {
   config: AppConfig;
@@ -16,6 +17,10 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
   const [promptEditable, setPromptEditable] = useState(config.systemPrompt);
   const [manualApiKey, setManualApiKey] = useState('');
   
+  // Supabase Manual Config
+  const [manualSupabaseUrl, setManualSupabaseUrl] = useState('');
+  const [manualSupabaseKey, setManualSupabaseKey] = useState('');
+
   const [activeTab, setActiveTab] = useState<'chat' | 'settings'>('chat');
   const [loading, setLoading] = useState(false);
 
@@ -32,9 +37,15 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
     // Simple polling every 10 seconds to keep list fresh
     const interval = setInterval(fetchContacts, 10000);
     
-    // Load existing manual key
+    // Load existing manual keys
     const savedKey = localStorage.getItem('mara_gemini_api_key');
     if (savedKey) setManualApiKey(savedKey);
+    
+    const savedUrl = localStorage.getItem('mara_supabase_url');
+    if (savedUrl) setManualSupabaseUrl(savedUrl);
+    
+    const savedSbKey = localStorage.getItem('mara_supabase_key');
+    if (savedSbKey) setManualSupabaseKey(savedSbKey);
 
     return () => clearInterval(interval);
   }, []);
@@ -54,10 +65,24 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
   const handleSaveApiKey = () => {
     if (manualApiKey.trim()) {
         localStorage.setItem('mara_gemini_api_key', manualApiKey.trim());
-        alert('Chave de API salva localmente! O app usará esta chave agora.');
+        alert('Chave de IA salva!');
     } else {
         localStorage.removeItem('mara_gemini_api_key');
-        alert('Chave removida. O app tentará usar as variáveis de ambiente.');
+        alert('Chave removida.');
+    }
+  };
+
+  const handleSaveSupabase = () => {
+    if (manualSupabaseUrl.trim() && manualSupabaseKey.trim()) {
+        localStorage.setItem('mara_supabase_url', manualSupabaseUrl.trim());
+        localStorage.setItem('mara_supabase_key', manualSupabaseKey.trim());
+        alert('Credenciais do Banco salvas! Recarregue a página para conectar.');
+        window.location.reload();
+    } else {
+        localStorage.removeItem('mara_supabase_url');
+        localStorage.removeItem('mara_supabase_key');
+        alert('Credenciais removidas.');
+        window.location.reload();
     }
   };
 
@@ -80,7 +105,13 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
-           {contacts.length === 0 ? (
+           {!isSupabaseConfigured ? (
+             <div className="p-8 text-center text-gray-500 text-sm flex flex-col items-center">
+                <Database className="w-8 h-8 mb-2 text-yellow-500" />
+                <p>Banco de dados desconectado.</p>
+                <p className="text-xs mt-2">Configure em "Configurações"</p>
+             </div>
+           ) : contacts.length === 0 ? (
              <div className="p-8 text-center text-gray-500 text-sm">Nenhum atendimento iniciado.</div>
            ) : (
              contacts.map(contact => (
@@ -117,7 +148,7 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
                  <div className="font-semibold text-lg dark:text-white">
                    {activeTab === 'chat' ? contacts.find(c => c.id === selectedContactId)?.name : 'Configurações'}
                  </div>
-                 {activeTab === 'chat' && (
+                 {activeTab === 'chat' && isSupabaseConfigured && (
                     <div className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
                       Supabase Online
                     </div>
@@ -180,8 +211,48 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
                            onClick={handleSaveApiKey}
                            className="bg-gray-900 text-white px-4 py-2 rounded text-sm hover:bg-black"
                          >
-                           Salvar Chave
+                           Salvar
                          </button>
+                       </div>
+                    </div>
+
+                    {/* Supabase Config Section */}
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
+                       <h3 className="text-lg font-medium mb-4 dark:text-white flex items-center gap-2">
+                         <Database className="w-5 h-5" /> Configuração do Banco (Supabase)
+                       </h3>
+                       <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded mb-4 text-xs text-blue-800 dark:text-blue-200">
+                          Cole abaixo as credenciais do seu projeto Supabase se a conexão automática falhar.
+                       </div>
+                       <div className="space-y-3">
+                         <div>
+                            <label className="text-xs text-gray-500 block mb-1">URL do Projeto</label>
+                            <input 
+                              type="text" 
+                              placeholder="https://xxx.supabase.co" 
+                              className="w-full p-2 text-sm border rounded outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                              value={manualSupabaseUrl}
+                              onChange={(e) => setManualSupabaseUrl(e.target.value)}
+                            />
+                         </div>
+                         <div>
+                            <label className="text-xs text-gray-500 block mb-1">Chave Pública (Anon Key)</label>
+                            <input 
+                              type="password" 
+                              placeholder="eyJxh..." 
+                              className="w-full p-2 text-sm border rounded outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                              value={manualSupabaseKey}
+                              onChange={(e) => setManualSupabaseKey(e.target.value)}
+                            />
+                         </div>
+                         <div className="flex justify-end">
+                            <button 
+                              onClick={handleSaveSupabase}
+                              className="bg-gray-900 text-white px-4 py-2 rounded text-sm hover:bg-black"
+                            >
+                              Salvar e Conectar
+                            </button>
+                         </div>
                        </div>
                     </div>
 

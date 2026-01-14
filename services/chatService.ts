@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { Message, Contact } from '../types';
 
 // Map DB row to Frontend Message Type
@@ -22,32 +22,45 @@ const mapDbContact = (row: any): Contact => ({
   status: row.status as any
 });
 
+// Helper for Demo Mode
+const generateTempId = () => 'temp-id-' + Date.now();
+
 export const chatService = {
   // Ensure a contact exists for the current user (Client View)
   getOrCreateContact: async (contactId: string | null): Promise<string> => {
-    if (contactId) {
+    // Demo Mode Check
+    if (!isSupabaseConfigured) {
+      console.log("Supabase off: Usando ID temporário.");
+      return contactId && contactId.startsWith('temp-id') ? contactId : generateTempId();
+    }
+
+    if (contactId && !contactId.startsWith('temp-id')) {
        // Verify it exists
        const { data } = await supabase.from('contacts').select('id').eq('id', contactId).single();
        if (data) return data.id;
     }
 
     // Create new
-    const { data, error } = await supabase.from('contacts').insert([{
-       name: 'Novo Cliente',
-       last_message: 'Iniciou conversa',
-       avatar: `https://ui-avatars.com/api/?name=User+${Math.floor(Math.random() * 100)}&background=random`
-    }]).select().single();
+    try {
+      const { data, error } = await supabase.from('contacts').insert([{
+         name: 'Novo Cliente',
+         last_message: 'Iniciou conversa',
+         avatar: `https://ui-avatars.com/api/?name=User+${Math.floor(Math.random() * 100)}&background=random`
+      }]).select().single();
 
-    if (error) {
-        // Fallback for "offline" or configured incorrectly mode
-        console.error("Error creating contact", error);
-        return 'temp-id-' + Date.now();
+      if (error) {
+          console.error("Error creating contact:", error);
+          return generateTempId();
+      }
+      return data.id;
+    } catch (err) {
+      console.error("Critical error connecting to DB:", err);
+      return generateTempId();
     }
-    return data.id;
   },
 
   loadMessages: async (contactId: string): Promise<Message[]> => {
-    if (contactId.startsWith('temp-id')) return [];
+    if (!isSupabaseConfigured || contactId.startsWith('temp-id')) return [];
 
     const { data, error } = await supabase
       .from('messages')
@@ -59,11 +72,11 @@ export const chatService = {
         console.error("Error loading messages", error);
         return [];
     }
-    return data.map(mapDbMessage);
+    return data ? data.map(mapDbMessage) : [];
   },
 
   saveMessage: async (contactId: string, message: Partial<Message>) => {
-    if (contactId.startsWith('temp-id')) return;
+    if (!isSupabaseConfigured || contactId.startsWith('temp-id')) return;
 
     // 1. Insert Message
     const { error: msgError } = await supabase.from('messages').insert([{
@@ -85,7 +98,7 @@ export const chatService = {
   },
 
   updateContactStatus: async (contactId: string, status: string, name?: string) => {
-     if (contactId.startsWith('temp-id')) return;
+     if (!isSupabaseConfigured || contactId.startsWith('temp-id')) return;
 
      const updateData: any = { status };
      if (name) updateData.name = name;
@@ -94,12 +107,14 @@ export const chatService = {
   },
 
   getAllContacts: async (): Promise<Contact[]> => {
+    if (!isSupabaseConfigured) return [];
+
     const { data, error } = await supabase
       .from('contacts')
       .select('*')
       .order('updated_at', { ascending: false });
 
     if (error) return [];
-    return data.map(mapDbContact);
+    return data ? data.map(mapDbContact) : [];
   }
 };
