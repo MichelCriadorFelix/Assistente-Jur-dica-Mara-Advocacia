@@ -1,10 +1,10 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// Lista de chaves de fallback hardcoded
+// Lista de chaves de fallback (Sua nova chave está em primeiro lugar)
 const FALLBACK_KEYS = [
-  "AIzaSyD-8oeV2Ojwl3a5q9Fe7RkdQ2QROehlljY", // Key 2 (Prioridade Alta - Nova)
-  "AIzaSyAKn6TpoKlcyuLESez4GMSMeconldxfYNk"  // Key 1 (Backup)
+  "AIzaSyD-8oeV2Ojwl3a5q9Fe7RkdQ2QROehlljY", // Nova Chave (Prioridade Máxima)
+  "AIzaSyAKn6TpoKlcyuLESez4GMSMeconldxfYNk"  // Chave antiga (Backup)
 ];
 
 // Helper para coletar TODAS as chaves disponíveis
@@ -18,7 +18,6 @@ const getAvailableApiKeys = (): string[] => {
   }
 
   // 2. Variáveis de Ambiente (Vite/Next)
-  // Tenta ler tanto do import.meta.env quanto do process.env (polyfill)
   const envs = [
     (import.meta as any).env,
     (window as any).process?.env
@@ -26,18 +25,18 @@ const getAvailableApiKeys = (): string[] => {
 
   envs.forEach(env => {
     if (!env) return;
+    // Tenta capturar todas as variações possíveis
     if (env.VITE_API_KEY_2) keys.push(env.VITE_API_KEY_2);
     if (env.VITE_API_KEY_1) keys.push(env.VITE_API_KEY_1);
     if (env.VITE_API_KEY) keys.push(env.VITE_API_KEY);
     if (env.NEXT_PUBLIC_API_KEY) keys.push(env.NEXT_PUBLIC_API_KEY);
   });
 
-  // 3. Adicionar Fallbacks Hardcoded (garantindo que não duplique se já estiver no env)
+  // 3. Adicionar Fallbacks Hardcoded
   FALLBACK_KEYS.forEach(k => {
     if (!keys.includes(k)) keys.push(k);
   });
 
-  // Remove duplicatas e strings vazias
   return [...new Set(keys)].filter(k => !!k);
 };
 
@@ -99,12 +98,12 @@ export const sendMessageToGemini = async (
 
   for (const apiKey of apiKeys) {
     try {
-      console.log(`Tentando conectar com chave final ...${apiKey.slice(-4)}`);
+      // Log discreto para debug (mostra apenas final da chave)
+      console.log(`Tentando conectar com IA usando chave ...${apiKey.slice(-4)}`);
+      
       const ai = new GoogleGenAI({ apiKey });
 
-      // CORREÇÃO CRÍTICA: Usando gemini-1.5-flash
-      // O gemini-2.0-flash-exp tem cotas muito baixas/instáveis para chaves gratuitas.
-      // O 1.5 Flash é estável e tem alta capacidade gratuita.
+      // IMPORTANTE: Forçando gemini-1.5-flash pois o 2.0-flash-exp tem limite muito baixo
       const modelName = 'gemini-1.5-flash'; 
 
       const chat = ai.chats.create({
@@ -115,7 +114,6 @@ export const sendMessageToGemini = async (
 
       const result = await chat.sendMessage({ message: currentParts });
       
-      // Se chegou aqui, funcionou!
       const response = result;
 
       if (response.functionCalls && response.functionCalls.length > 0) {
@@ -136,20 +134,16 @@ export const sendMessageToGemini = async (
       const errorMsg = error.message || JSON.stringify(error);
       console.warn(`Falha na chave ...${apiKey.slice(-4)}:`, errorMsg);
 
-      // Continua para a próxima chave se for erro de cota ou permissão
+      // Continua para a próxima chave se for erro de cota (429)
       if (errorMsg.includes('429') || errorMsg.includes('403') || errorMsg.includes('Quota')) {
         continue; 
       }
-      
-      // Se não for erro de chave/cota, pode ser erro de requisição, tenta próxima só por garantia
     }
   }
-
-  console.error("Todas as chaves falharam.");
   
   if (lastError?.message?.includes('429')) {
-    return "⚠️ Limite de tráfego atingido (429). Mesmo trocando as chaves, o Google está limitando o acesso gratuito no momento. Tente novamente em 1 minuto.";
+    return "⚠️ Mara indisponível momentaneamente (Muitos acessos simultâneos ao Google Gemini). Tente novamente em 1 minuto.";
   }
 
-  return `⚠️ Erro Técnico: ${lastError?.message || 'Falha na conexão com IA'}`;
+  return `⚠️ Erro Técnico na IA: ${lastError?.message || 'Falha na conexão'}`;
 };

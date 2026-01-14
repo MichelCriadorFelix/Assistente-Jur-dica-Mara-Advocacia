@@ -49,12 +49,10 @@ export const chatService = {
     if (!isSupabaseConfigured) {
       const db = getLocalDB();
       
-      // Se já existe um ID local válido
       if (contactId && db.contacts.find(c => c.id === contactId)) {
         return contactId;
       }
 
-      // Cria novo contato local
       const newContact: Contact = {
         id: 'local-' + Date.now(),
         name: 'Novo Cliente (Local)',
@@ -73,22 +71,30 @@ export const chatService = {
 
     // 2. MODO SUPABASE
     if (contactId && !contactId.startsWith('local-')) {
+       // Verifica se o ID existe no banco
        const { data } = await supabase.from('contacts').select('id').eq('id', contactId).single();
        if (data) return data.id;
     }
 
     try {
+      // CORREÇÃO CRÍTICA: Gerar o ID manualmente pois a tabela é 'text primary key'
+      const newId = crypto.randomUUID(); 
+
       const { data, error } = await supabase.from('contacts').insert([{
+         id: newId,
          name: 'Novo Cliente',
          last_message: 'Iniciou conversa',
          avatar: `https://ui-avatars.com/api/?name=User+${Math.floor(Math.random() * 100)}&background=random`
       }]).select().single();
 
-      if (error) throw error;
+      if (error) {
+        console.error("Erro ao criar contato no Supabase:", error);
+        throw error;
+      }
       return data.id;
     } catch (err) {
-      console.warn("Supabase falhou, usando modo local.");
-      return chatService.getOrCreateContact('force-local'); // Recursiva para cair no modo local
+      console.warn("Falha crítica no Supabase, ativando modo local de emergência.", err);
+      return chatService.getOrCreateContact('force-local'); 
     }
   },
 
@@ -97,7 +103,6 @@ export const chatService = {
     if (!isSupabaseConfigured || contactId.startsWith('local-')) {
       const db = getLocalDB();
       const msgs = db.messages[contactId] || [];
-      // Re-hidratar datas (strings -> Date objects)
       return msgs.map(m => ({ ...m, timestamp: new Date(m.timestamp) }));
     }
 
@@ -108,7 +113,10 @@ export const chatService = {
       .eq('contact_id', contactId)
       .order('created_at', { ascending: true });
     
-    if (error) return [];
+    if (error) {
+      console.error("Erro ao carregar mensagens:", error);
+      return [];
+    }
     return data ? data.map(mapDbMessage) : [];
   },
 
@@ -129,12 +137,10 @@ export const chatService = {
        if (!db.messages[contactId]) db.messages[contactId] = [];
        db.messages[contactId].push(newMessage);
 
-       // Atualiza contato
        const contactIndex = db.contacts.findIndex(c => c.id === contactId);
        if (contactIndex >= 0) {
          db.contacts[contactIndex].lastMessage = message.type === 'audio' ? '🎵 Áudio' : (message.content || '');
          db.contacts[contactIndex].time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-         // Move to top
          const contact = db.contacts.splice(contactIndex, 1)[0];
          db.contacts.unshift(contact);
        }
@@ -152,7 +158,9 @@ export const chatService = {
       audio_url: message.audioUrl
     }]);
 
-    if (!msgError) {
+    if (msgError) {
+      console.error("Erro ao salvar mensagem:", msgError);
+    } else {
         await supabase.from('contacts').update({
           last_message: message.type === 'audio' ? '🎵 Áudio' : message.content,
           updated_at: new Date().toISOString(),
@@ -193,7 +201,6 @@ export const chatService = {
       .order('updated_at', { ascending: false });
 
     if (error) {
-      // Fallback para local se a query falhar
       return getLocalDB().contacts;
     }
     return data ? data.map(mapDbContact) : [];
@@ -223,7 +230,6 @@ export const chatService = {
         new: data.filter(c => c.status === 'new').length
       };
     } catch (e) {
-      // Fallback silencioso para local
       const contacts = getLocalDB().contacts;
       return {
         total: contacts.length,
@@ -234,7 +240,6 @@ export const chatService = {
     }
   },
   
-  // Função extra para resetar dados locais (Útil para testes)
   clearLocalData: () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(LOCAL_STORAGE_KEY);

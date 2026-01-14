@@ -8,37 +8,21 @@ const getLocalConfig = (key: string) => {
   return null;
 };
 
-// Access variables prioritizing Vercel/Supabase integration naming
 const getSupabaseUrl = () => {
   // 1. Manual Override
   const local = getLocalConfig('mara_supabase_url');
   if (local) return local;
 
-  // 2. Hardcoded Fallback from your screenshot (Guarantee connection)
-  const hardcodedUrl = 'https://drcxpekguouqsoinaoeb.supabase.co';
-  
-  // 3. Env Vars
-  // Check import.meta.env (Vite) and window.process.env (Vercel injection sometimes ends up here)
-  const envs = [
-    (import.meta as any).env,
-    (window as any).process?.env
-  ];
-
-  for (const env of envs) {
-     if (!env) continue;
-     if (env.NEXT_PUBLIC_SUPABASE_URL) return env.NEXT_PUBLIC_SUPABASE_URL;
-     if (env.VITE_SUPABASE_URL) return env.VITE_SUPABASE_URL;
-  }
-
-  return hardcodedUrl;
+  // 2. SUA URL DO SUPABASE (Fixa conforme print)
+  return 'https://drcxpekguouqsoinaoeb.supabase.co';
 };
 
 const getSupabaseKey = () => {
-  // 1. Manual Override
+  // 1. Manual Override (Configurada na tela de Configurações)
   const local = getLocalConfig('mara_supabase_key');
   if (local) return local;
 
-  // 2. Env Vars
+  // 2. Env Vars (Vercel)
   const envs = [
     (import.meta as any).env,
     (window as any).process?.env
@@ -48,11 +32,8 @@ const getSupabaseKey = () => {
      if (!env) continue;
      if (env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
      if (env.VITE_SUPABASE_ANON_KEY) return env.VITE_SUPABASE_ANON_KEY;
-     // Sometimes Vercel pulls it as just 'SUPABASE_ANON_KEY' in backend contexts, but we check anyway
   }
   
-  // Se não encontrar a chave ANON, retornamos vazio para forçar o isSupabaseConfigured a ser falso
-  // e cair no modo LocalStorage, evitando que o app quebre tentando conectar sem chave.
   return '';
 };
 
@@ -63,7 +44,7 @@ const supabaseAnonKey = getSupabaseKey();
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey && !supabaseUrl.includes('placeholder') && supabaseAnonKey.length > 10);
 
 if (!isSupabaseConfigured) {
-  console.log("Supabase Offline: Usando modo LocalStorage. (URL OK, mas Chave Anon não encontrada nas variáveis)");
+  console.log("Supabase Parcialmente Configurado: URL encontrada, mas falta a CHAVE ANON.");
 } else {
   console.log("Supabase Conectado:", supabaseUrl);
 }

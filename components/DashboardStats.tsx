@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Users, CheckCircle, Clock, AlertTriangle, BarChart2 } from 'lucide-react';
+import { Users, CheckCircle, Clock, AlertTriangle, BarChart2, Database, Settings } from 'lucide-react';
 import { chatService } from '../services/chatService';
+import { isSupabaseConfigured } from '../services/supabaseClient';
 
 const DashboardStats: React.FC = () => {
   const [stats, setStats] = useState({ total: 0, triaged: 0, urgent: 0, new: 0 });
@@ -24,7 +25,7 @@ const DashboardStats: React.FC = () => {
     { title: 'Total de Leads', value: stats.total, icon: Users, color: 'bg-blue-500' },
     { title: 'Triagem Completa', value: stats.triaged, icon: CheckCircle, color: 'bg-green-500' },
     { title: 'Atenção Necessária', value: stats.urgent + stats.new, icon: AlertTriangle, color: 'bg-red-500' },
-    { title: 'Tempo Médio', value: '2.5m', icon: Clock, color: 'bg-yellow-500' }, // Hardcoded for now as it requires complex query
+    { title: 'Tempo Médio', value: '2.5m', icon: Clock, color: 'bg-yellow-500' }, 
   ];
 
   if (loading) {
@@ -33,6 +34,20 @@ const DashboardStats: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      
+      {/* Aviso de Configuração se estiver vazio e sem Supabase */}
+      {!isSupabaseConfigured && stats.total === 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg flex items-center justify-between text-yellow-800">
+           <div className="flex items-center gap-3">
+             <Database className="w-5 h-5" />
+             <span>O Banco de dados não está conectado. Os dados estão sendo salvos apenas no seu navegador (Local).</span>
+           </div>
+           {/* Note: This button relies on the parent layout to switch tabs, usually handled via context or prop drill, 
+               but here we act as a visual cue mostly */}
+           <div className="text-sm font-bold">Vá em Configurações &rarr;</div>
+        </div>
+      )}
+
       {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat, idx) => (
