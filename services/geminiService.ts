@@ -1,13 +1,12 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message, TeamMember, Contact } from "../types";
 import { DEFAULT_TEAM } from "../constants";
+import { learningService } from "./learningService";
 
 // LISTA DE MODELOS - ORDEM DE INTELIGÊNCIA
-// Usamos o PRO como primário para garantir o "Raciocínio Jurídico Avançado"
-// O Flash entra como backup se o Pro falhar ou estiver lento demais.
 const MODEL_CANDIDATES = [
-  'gemini-3-pro-preview',      // Raciocínio Superior
-  'gemini-3-flash-preview',    // Velocidade
+  'gemini-3-pro-preview',      // Cérebro Principal (Raciocínio)
+  'gemini-3-flash-preview',    // Backup Rápido
 ];
 
 const cleanKey = (key: string | undefined): string => {
@@ -27,7 +26,6 @@ const shuffleArray = (array: string[]) => {
 export const getAvailableApiKeysMap = (): Record<string, string> => {
   const keysMap: Record<string, string> = {};
   
-  // Include standard process.env.API_KEY if available
   if (process.env.API_KEY && process.env.API_KEY.length > 20) {
     keysMap['ENV_API_KEY'] = cleanKey(process.env.API_KEY);
   }
@@ -57,6 +55,7 @@ export const getAvailableApiKeys = (): string[] => {
 };
 
 // --- DEFINIÇÃO DE TOOLS ---
+
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
   description: 'Gera o relatório final de triagem para os advogados e marca o atendimento como concluído.',
@@ -72,7 +71,21 @@ const notifyTeamFunction: FunctionDeclaration = {
   },
 };
 
-const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
+// NOVA TOOL DE APRENDIZADO
+const saveKnowledgeFunction: FunctionDeclaration = {
+  name: 'save_knowledge',
+  description: 'Use esta função para MEMORIZAR uma nova regra, correção ou preferência ensinada pelo usuário.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      fact: { type: Type.STRING, description: "O fato ou regra a ser memorizada. Ex: 'Não atendemos aposentadoria rural', 'O prazo para recurso X é 15 dias'." },
+      category: { type: Type.STRING, enum: ["preference", "legal_rule", "correction", "vocabulary"] }
+    },
+    required: ['fact', 'category'],
+  },
+};
+
+const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction, saveKnowledgeFunction] }];
 
 // --- SERVIÇO PRINCIPAL ---
 
@@ -81,18 +94,26 @@ export const sendMessageToGemini = async (
   newMessage: { text?: string; audioBase64?: string; mimeType?: string },
   systemInstruction: string,
   onToolCall?: (toolCall: any) => void,
-  contactContext?: Contact | null // Contexto completo do contato
+  contactContext?: Contact | null 
 ): Promise<string> => {
   
   let apiKeys = getAvailableApiKeys();
   if (apiKeys.length === 0) return "⚠️ Erro: Chave de API não configurada.";
-  
   apiKeys = shuffleArray(apiKeys);
 
-  // 1. CONSTRUÇÃO DO CONTEXTO AVANÇADO
+  // 1. CARREGA MEMÓRIAS APRENDIDAS (RAG SIMPLES)
+  const memories = await learningService.getAllMemories();
+  const knowledgeBase = memories.map(m => `- [APRENDIZADO]: ${m.content}`).join('\n');
+
+  // 2. CONSTRUÇÃO DO CONTEXTO AVANÇADO
   let finalPrompt = systemInstruction;
 
-  // Injeta nomes da equipe para ela saber quem citar
+  // Injeta Aprendizados (Cérebro Evolutivo)
+  if (memories.length > 0) {
+    finalPrompt += `\n\n### 🧠 MINHA MEMÓRIA EVOLUTIVA (REGRAS APRENDIDAS):\nSiga estas instruções acima de qualquer outra regra padrão:\n${knowledgeBase}`;
+  }
+
+  // Injeta Equipe
   try {
      const savedTeam = localStorage.getItem('mara_team_config');
      const team: TeamMember[] = savedTeam ? JSON.parse(savedTeam) : DEFAULT_TEAM;
@@ -100,24 +121,22 @@ export const sendMessageToGemini = async (
      finalPrompt += `\n\n### 👥 NOSSA EQUIPE:\n${teamList}`;
   } catch(e) {}
 
-  // Injeta memória de longo prazo (Resumo Jurídico anterior)
+  // Injeta Contexto do Caso
   if (contactContext?.legalSummary) {
-    finalPrompt += `\n\n### 📂 MEMÓRIA DO CASO (O que já sabemos):\n"${contactContext.legalSummary}"\n(Use isso para não perguntar coisas repetidas).`;
+    finalPrompt += `\n\n### 📂 MEMÓRIA DESTE CASO ESPECÍFICO:\n"${contactContext.legalSummary}"\n(Use isso para não perguntar coisas repetidas).`;
   }
   
-  // Injeta Status Processual (Se houver)
   if (contactContext?.caseStatus) {
     finalPrompt += `\n\n### ⚖️ STATUS PROCESSUAL ATUAL:\n"${contactContext.caseStatus}"\n(Informe isso ao cliente se ele perguntar do processo).`;
   }
 
-  // 2. PREPARAÇÃO DO HISTÓRICO
-  // Aumentamos o slice para 30 mensagens para suportar conversas longas
+  // 3. PREPARAÇÃO DO HISTÓRICO
   const recentHistory = history.slice(-30).map(m => ({
     role: m.role,
     parts: [{ text: m.type === 'audio' ? '[ÁUDIO ENVIADO PELO CLIENTE]' : m.content }]
   }));
 
-  // 3. PREPARAÇÃO DA MENSAGEM ATUAL
+  // 4. PREPARAÇÃO DA MENSAGEM
   const currentParts: Part[] = [];
   
   if (newMessage.audioBase64) {
@@ -127,15 +146,14 @@ export const sendMessageToGemini = async (
         data: newMessage.audioBase64
       }
     });
-    // Instrução reforçada para áudio
-    currentParts.push({ text: "O usuário enviou este ÁUDIO. Ouça com atenção aos detalhes jurídicos, tom de voz e fatos narrados. Responda de forma acolhedora e direta." });
+    currentParts.push({ text: "O usuário enviou este ÁUDIO. Interprete o português coloquial, gírias e erros gramaticais com perfeição. Foque na intenção jurídica." });
   }
   
   if (newMessage.text) {
     currentParts.push({ text: newMessage.text });
   }
 
-  // 4. EXECUÇÃO DA IA (TENTATIVA E ERRO INTELIGENTE)
+  // 5. LOOP DE TENTATIVAS
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
 
@@ -146,48 +164,52 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.5, // Equilíbrio entre criatividade e precisão jurídica
+            temperature: 0.4, // Mais baixa para seguir rigorosamente os "Aprendizados"
           },
           history: recentHistory
         });
 
-        // Timeout maior para o modelo PRO pensar
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 25000));
         const apiPromise = chat.sendMessage({ message: currentParts });
-        
         const result: any = await Promise.race([apiPromise, timeoutPromise]);
         
         let responseText = result.text || "";
 
-        // Lida com Tools (Geração de Relatório)
+        // PROCESSAMENTO DE TOOLS (Recursivo para permitir Learn -> Response -> Learn)
         if (result.functionCalls && result.functionCalls.length > 0) {
-           const call = result.functionCalls[0];
-           
-           if (call.name === 'notificar_equipe' && onToolCall) {
-              onToolCall({ 
-                name: call.name, 
-                args: call.args 
-              });
-              
-              // A IA confirma para o cliente
-              const toolResp = await chat.sendMessage({
-                message: [{ functionResponse: { name: call.name, response: { result: "Success" } } }]
-              });
-              responseText = toolResp.text;
+           for (const call of result.functionCalls) {
+             
+             // TOOL: Salvar Aprendizado
+             if (call.name === 'save_knowledge') {
+                await learningService.addMemory(call.args.fact, call.args.category);
+                
+                // Informa a IA que foi salvo
+                const toolResp = await chat.sendMessage({
+                  message: [{ functionResponse: { name: call.name, response: { result: "Memorizado com sucesso." } } }]
+                });
+                responseText = toolResp.text;
+             }
+             
+             // TOOL: Notificar Equipe
+             else if (call.name === 'notificar_equipe' && onToolCall) {
+                onToolCall({ name: call.name, args: call.args });
+                const toolResp = await chat.sendMessage({
+                  message: [{ functionResponse: { name: call.name, response: { result: "Success" } } }]
+                });
+                responseText = toolResp.text;
+             }
            }
         }
 
         if (responseText) return responseText;
 
       } catch (e: any) {
-        console.warn(`Tentativa falha com ${modelName}:`, e.message);
-        // Se for erro de quota (429), tenta próxima chave. Se for outro erro, tenta próximo modelo.
         if (e.message?.includes('429')) break; 
       }
     }
   }
 
-  return "Desculpe, estamos com uma altíssima demanda agora. Poderia repetir sua dúvida por texto, por favor?";
+  return "Desculpe, a conexão oscilou. Poderia repetir?";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {

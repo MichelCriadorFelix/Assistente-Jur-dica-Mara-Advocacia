@@ -28,6 +28,13 @@ export interface TeamMember {
   active: boolean;
 }
 
+export interface AiMemory {
+  id: string;
+  content: string; // O fato aprendido
+  category: 'preference' | 'legal_rule' | 'correction' | 'vocabulary';
+  createdAt: string;
+}
+
 export interface AppConfig {
   systemPrompt: string;
   team: TeamMember[];
