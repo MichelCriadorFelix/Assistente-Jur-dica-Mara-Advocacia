@@ -11,43 +11,36 @@ const getModelName = (): string => {
 };
 
 // Helper para coletar chaves. 
-// Procura agressivamente por chaves no ambiente (Vercel) e LocalStorage.
 export const getAvailableApiKeys = (): string[] => {
   const keys: string[] = [];
 
   // Variáveis de Ambiente
+  // O Vite SÓ inclui variáveis que começam com VITE_ no build final.
   const envVars = [
-    // 1. Chaves com prefixo padrão (Vite/Next) - Garantidos pelo Framework
-    (import.meta as any).env?.VITE_API_KEY,
-    (import.meta as any).env?.VITE_API_KEY_1,
-    (import.meta as any).env?.VITE_API_KEY_2,
-    (import.meta as any).env?.VITE_API_KEY_3,
-    (import.meta as any).env?.VITE_GEMINI_KEY,
+    // 1. Prioridade Máxima (Exatamente como no seu print da Vercel)
+    (import.meta as any).env?.VITE_ux_config,
+    (import.meta as any).env?.VITE_APP_PARAM_1,
+    (import.meta as any).env?.VITE_APP_PARAM_2,
+    (import.meta as any).env?.VITE_APP_PARAM_3,
+
+    // 2. Legado / Outras tentativas
+    (import.meta as any).env?.VITE_PUBLIC_DATA_1,
+    (import.meta as any).env?.VITE_G_CREDENTIAL,
+    (import.meta as any).env?.VITE_API_KEY, // Vercel costuma bloquear esta
+    
+    // 3. Fallbacks
     process.env.NEXT_PUBLIC_API_KEY,
-    
-    // 2. Chaves Nativas Vercel (Solicitado pelo Usuário)
-    // Nota: Se o build tool (Vite) não estiver configurado para 'define', estas podem vir undefined.
-    // Mas vamos tentar acessá-las via process.env e import.meta
-    process.env.API_KEY,
-    process.env.API_KEY_1,
-    process.env.API_KEY_2,
-    process.env.API_KEY_3,
-    (import.meta as any).env?.API_KEY,
-    (import.meta as any).env?.API_KEY_1,
-    (import.meta as any).env?.API_KEY_2,
-    (import.meta as any).env?.API_KEY_3,
-    
-    // Fallbacks legados
-    process.env.REACT_APP_API_KEY
+    (import.meta as any).env?.API_KEY_1
   ];
 
   envVars.forEach(k => {
-    if (k && typeof k === 'string' && k.length > 20 && !k.includes('placeholder')) {
+    // Validação básica para garantir que não é uma string vazia ou placeholder
+    if (k && typeof k === 'string' && k.length > 10 && !k.includes('placeholder')) {
       keys.push(k.trim());
     }
   });
 
-  // 3. Local Storage (Override manual do usuário)
+  // Local Storage (Override manual do usuário pela tela de Configurações)
   if (typeof window !== 'undefined') {
     const localKey = localStorage.getItem('mara_gemini_api_key');
     if (localKey && localKey.trim().length > 0) {
@@ -58,11 +51,10 @@ export const getAvailableApiKeys = (): string[] => {
   // Remove duplicatas e vazios
   const uniqueKeys = [...new Set(keys)].filter(k => !!k);
   
-  // Log para debug (mostra apenas os últimos 4 dígitos)
   if (uniqueKeys.length > 0) {
-    console.log(`[Mara System] ${uniqueKeys.length} chaves carregadas. Usando final ...${uniqueKeys[0].slice(-4)}`);
+    console.log(`[Mara System] ${uniqueKeys.length} credenciais carregadas com sucesso.`);
   } else {
-    console.warn("[Mara System] Nenhuma chave encontrada. Verifique se API_KEY_1 está definida na Vercel.");
+    console.warn("[Mara System] Nenhuma chave encontrada. Verifique VITE_ux_config na Vercel.");
   }
 
   return uniqueKeys;
@@ -96,7 +88,7 @@ export const sendMessageToGemini = async (
   const modelName = getModelName();
   
   if (apiKeys.length === 0) {
-    return "⚠️ **Erro de Chave API**\n\nNão encontrei as chaves `API_KEY_1`, `API_KEY_2` ou `VITE_API_KEY`.\n\n**Dica Vercel:**\nO sistema de segurança do Vite pode estar ocultando suas chaves `API_KEY_1` do navegador. Se isso acontecer, você precisará renomeá-las para `VITE_API_KEY_1` na Vercel (pode ignorar o aviso de segurança deles, pois este é um App Web e precisa da chave pública).";
+    return "⚠️ **Erro de Sincronização (Vercel)**\n\nO sistema atualizou, mas ainda não leu suas chaves.\n\n1. Verifique se na Vercel a variável se chama exatamente `VITE_ux_config` ou `VITE_APP_PARAM_1`.\n2. Se você acabou de criar as variáveis, vá na Vercel em **Deployments** e clique em **Redeploy** no último deploy para ele pegar as novas chaves.\n3. Ou insira a chave manualmente em Configurações (ícone de engrenagem) para testar agora.";
   }
 
   // Preparar o histórico
@@ -150,12 +142,12 @@ export const sendMessageToGemini = async (
 
     } catch (error: any) {
       const msg = error.message || '';
-      console.warn(`[API Error] Chave final ...${apiKey.slice(-4)} falhou:`, msg);
+      console.warn(`[API Error] Falha com credencial final ...${apiKey.slice(-4)}:`, msg);
 
       // Se for a última chave e falhou todas
       if (apiKeys.indexOf(apiKey) === apiKeys.length - 1) {
-         if (msg.includes('403') || msg.includes('key not valid')) {
-             return "🚫 **Chave Inválida/Bloqueada**\n\nO Google rejeitou a chave API configurada. Verifique se ela foi copiada corretamente.";
+         if (msg.includes('403') || msg.includes('key not valid') || msg.includes('PERMISSION_DENIED')) {
+             return "🚫 **Acesso Negado (Google)**\n\nA chave configurada foi rejeitada pelo Google. Verifique se a variável `VITE_ux_config` na Vercel contém a chave correta do AI Studio e se a cobrança está ativa (se necessário).";
          }
          if (msg.includes('429')) return "⏳ A IA está sobrecarregada no momento. Tente novamente em alguns segundos.";
          return "⚠️ **Erro Técnico:** " + msg;

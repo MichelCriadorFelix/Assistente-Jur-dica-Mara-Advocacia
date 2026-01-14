@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, ExternalLink, RefreshCw, Info } from 'lucide-react';
+import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, RefreshCw, Copy } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys } from '../services/geminiService';
 
@@ -74,6 +74,12 @@ const SettingsScreen: React.FC = () => {
 
   const isSupabaseActive = !!localStorage.getItem('mara_supabase_key');
 
+  const supportedVars = [
+    "VITE_ux_config",
+    "VITE_APP_PARAM_1",
+    "VITE_APP_PARAM_2"
+  ];
+
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-10">
       
@@ -90,22 +96,27 @@ const SettingsScreen: React.FC = () => {
              <>
                <CheckCircle className="w-5 h-5 text-green-600 mt-1" />
                <div>
-                 <p className="font-bold text-sm">Conectado: {envKeysDetected} chave(s) detectada(s) do servidor.</p>
-                 <p className="text-xs mt-1">O sistema encontrou suas chaves (API_KEY_1, VITE_API_KEY, etc) com sucesso.</p>
+                 <p className="font-bold text-sm">Conectado: {envKeysDetected} credencial(is) detectada(s) do servidor.</p>
+                 <p className="text-xs mt-1">O sistema está lendo suas variáveis da Vercel (ex: VITE_ux_config).</p>
                </div>
              </>
            ) : (
              <>
                <AlertTriangle className="w-5 h-5 text-amber-500 mt-1" />
-               <div>
-                 <p className="font-bold text-sm">Nenhuma chave de ambiente visível.</p>
-                 <p className="text-xs mt-1 leading-relaxed">
-                   Se você definiu <code>API_KEY_1</code> na Vercel e ela não aparece aqui, é porque o Vite está bloqueando por segurança.
-                   <br/><br/>
-                   <strong>Solução:</strong> Renomeie na Vercel para <code>VITE_API_KEY_1</code>. 
-                   <br/>
-                   <em>(Pode ignorar o aviso da Vercel sobre "expor dados". Para este App funcionar no navegador, a chave PRECISA ser pública).</em>
-                 </p>
+               <div className="flex-1">
+                 <p className="font-bold text-sm">Nenhuma chave detectada.</p>
+                 <div className="text-xs mt-2 text-gray-600 dark:text-gray-400">
+                   <p className="mb-2"><strong>Correção Vercel:</strong></p>
+                   <p className="mb-2">Verifique se você criou a variável com um destes nomes exatos e depois fez o <strong>Redeploy</strong>:</p>
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                      {supportedVars.map(v => (
+                        <div key={v} className="bg-white dark:bg-gray-900 border px-2 py-1.5 rounded flex justify-between items-center text-emerald-700 dark:text-emerald-400">
+                          <code className="text-xs font-mono select-all font-bold">{v}</code>
+                        </div>
+                      ))}
+                   </div>
+                   <p className="text-gray-500 italic">* Se acabou de mudar na Vercel, vá em "Deployments" e clique em "Redeploy".</p>
+                 </div>
                </div>
              </>
            )}
