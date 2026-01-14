@@ -30,8 +30,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Mensagem de Boas-vindas Padrão (Não salva no banco ainda, só visual)
-           // Isso orienta o usuário sobre o que fazer
+           // Mensagem de Boas-vindas Padrão
            const initialMsg: Message = {
              id: 'init-welcome', 
              role: 'model', 
@@ -67,8 +66,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
     };
 
     // 2. Atualiza UI imediatamente (Optimistic)
-    const currentHistory = [...messages, userMsg];
-    setMessages(currentHistory);
+    // IMPORTANTE: Salvamos o estado anterior para passar como histórico para a IA
+    const previousHistory = [...messages]; 
+    setMessages(prev => [...prev, userMsg]);
+    
     setInputText('');
     setIsLoading(true);
 
@@ -90,10 +91,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       }
 
       // 5. Envia para IA
-      // Filtramos a mensagem inicial 'fake' visual do histórico técnico se ela não estiver no banco, 
-      // mas o prompt do sistema já orienta a IA, então enviamos o histórico limpo.
+      // CORREÇÃO CRÍTICA: Passamos 'previousHistory' (sem a msg atual) para o contexto da IA,
+      // pois a msg atual é enviada como 'newMessage'. Isso evita duplicação e alucinação.
+      const historyForAI = previousHistory.filter(m => m.id !== 'init-welcome');
+
       const responseText = await sendMessageToGemini(
-        currentHistory.filter(m => m.id !== 'init-welcome'), 
+        historyForAI, 
         { text, audioBase64 }, 
         config.systemPrompt,
         async (toolCall) => {
