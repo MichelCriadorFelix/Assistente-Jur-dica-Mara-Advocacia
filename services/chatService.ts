@@ -6,7 +6,7 @@ const LOCAL_STORAGE_KEY = 'mara_local_db';
 
 interface LocalDB {
   contacts: Contact[];
-  messages: Record<string, Message[]>; // contactId -> messages[]
+  messages: Record<string, Message[]>; 
 }
 
 const getLocalDB = (): LocalDB => {
@@ -21,7 +21,18 @@ const saveLocalDB = (db: LocalDB) => {
   }
 };
 
-// ===================================================
+const mapDbContact = (row: any): Contact => ({
+  id: row.id,
+  name: row.name,
+  lastMessage: row.last_message,
+  time: new Date(row.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  avatar: row.avatar,
+  unreadCount: row.unread_count,
+  status: row.status as any,
+  caseStatus: row.case_status || '',
+  legalSummary: row.legal_summary || '', // Mapeia o novo campo
+  aiPaused: row.ai_paused || false
+});
 
 const mapDbMessage = (row: any): Message => ({
   id: row.id,
@@ -32,38 +43,21 @@ const mapDbMessage = (row: any): Message => ({
   audioUrl: row.audio_url
 });
 
-const mapDbContact = (row: any): Contact => ({
-  id: row.id,
-  name: row.name,
-  lastMessage: row.last_message,
-  time: new Date(row.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-  avatar: row.avatar,
-  unreadCount: row.unread_count,
-  status: row.status as any,
-  caseStatus: row.case_status || '',
-  aiPaused: row.ai_paused || false // Mapeia o novo campo
-});
-
 export const chatService = {
   
   getOrCreateContact: async (contactId: string | null): Promise<string> => {
-    // 1. MODO LOCAL (Se Supabase estiver OFF ou falhar)
     if (!isSupabaseConfigured) {
       const db = getLocalDB();
-      
-      if (contactId && db.contacts.find(c => c.id === contactId)) {
-        return contactId;
-      }
+      if (contactId && db.contacts.find(c => c.id === contactId)) return contactId;
 
       const newContact: Contact = {
         id: 'local-' + Date.now(),
-        name: 'Novo Cliente (Local)',
+        name: 'Novo Cliente',
         lastMessage: 'Iniciou conversa',
         time: new Date().toLocaleTimeString(),
-        avatar: `https://ui-avatars.com/api/?name=Cliente+${Math.floor(Math.random() * 100)}&background=random`,
+        avatar: `https://ui-avatars.com/api/?name=Cliente&background=random`,
         unreadCount: 0,
         status: 'new',
-        caseStatus: '',
         aiPaused: false
       };
       
@@ -73,36 +67,25 @@ export const chatService = {
       return newContact.id;
     }
 
-    // 2. MODO SUPABASE
     if (contactId && !contactId.startsWith('local-')) {
        const { data } = await supabase.from('contacts').select('id').eq('id', contactId).single();
        if (data) return data.id;
     }
 
-    try {
-      const newId = crypto.randomUUID(); 
+    const { data, error } = await supabase.from('contacts').insert([{
+       name: 'Novo Cliente',
+       last_message: 'Iniciou conversa',
+       avatar: `https://ui-avatars.com/api/?name=User&background=random`
+    }]).select().single();
 
-      const { data, error } = await supabase.from('contacts').insert([{
-         id: newId,
-         name: 'Novo Cliente',
-         last_message: 'Iniciou conversa',
-         avatar: `https://ui-avatars.com/api/?name=User+${Math.floor(Math.random() * 100)}&background=random`
-      }]).select().single();
-
-      if (error) throw error;
-      return data.id;
-    } catch (err) {
-      console.warn("Falha crítica no Supabase, ativando modo local.", err);
-      return chatService.getOrCreateContact('force-local'); 
-    }
+    if (error) throw error;
+    return data.id;
   },
 
   getContactDetails: async (contactId: string): Promise<Contact | null> => {
-     // LOCAL
      if (!isSupabaseConfigured || contactId.startsWith('local-')) {
        return getLocalDB().contacts.find(c => c.id === contactId) || null;
      }
-     // SUPABASE
      const { data, error } = await supabase.from('contacts').select('*').eq('id', contactId).single();
      if (error || !data) return null;
      return mapDbContact(data);
@@ -115,7 +98,7 @@ export const chatService = {
       return msgs.map(m => ({ ...m, timestamp: new Date(m.timestamp) }));
     }
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('messages')
       .select('*')
       .eq('contact_id', contactId)
@@ -137,18 +120,19 @@ export const chatService = {
        };
        if (!db.messages[contactId]) db.messages[contactId] = [];
        db.messages[contactId].push(newMessage);
-       const contactIndex = db.contacts.findIndex(c => c.id === contactId);
-       if (contactIndex >= 0) {
-         db.contacts[contactIndex].lastMessage = message.type === 'audio' ? '🎵 Áudio' : (message.content || '');
-         db.contacts[contactIndex].time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-         const contact = db.contacts.splice(contactIndex, 1)[0];
-         db.contacts.unshift(contact);
+       
+       const idx = db.contacts.findIndex(c => c.id === contactId);
+       if (idx >= 0) {
+         db.contacts[idx].lastMessage = message.type === 'audio' ? '🎵 Áudio' : (message.content || '');
+         db.contacts[idx].time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+         const c = db.contacts.splice(idx, 1)[0];
+         db.contacts.unshift(c);
        }
        saveLocalDB(db);
        return;
     }
 
-    const { error: msgError } = await supabase.from('messages').insert([{
+    await supabase.from('messages').insert([{
       contact_id: contactId,
       role: message.role,
       content: message.content,
@@ -156,28 +140,27 @@ export const chatService = {
       audio_url: message.audioUrl
     }]);
 
-    if (!msgError) {
-        await supabase.from('contacts').update({
-          last_message: message.type === 'audio' ? '🎵 Áudio' : message.content,
-          updated_at: new Date().toISOString(),
-          unread_count: 0 
-        }).eq('id', contactId);
-    }
+    await supabase.from('contacts').update({
+      last_message: message.type === 'audio' ? '🎵 Áudio' : message.content,
+      updated_at: new Date().toISOString(),
+      unread_count: 0
+    }).eq('id', contactId);
   },
 
-  updateContactStatus: async (contactId: string, status: string, name?: string) => {
+  updateContactStatus: async (contactId: string, status: string, name?: string, legalSummary?: string) => {
+     const updateData: any = { status };
+     if (name) updateData.name = name;
+     if (legalSummary) updateData.legal_summary = legalSummary;
+
      if (!isSupabaseConfigured || contactId.startsWith('local-')) {
         const db = getLocalDB();
         const contact = db.contacts.find(c => c.id === contactId);
         if (contact) {
-          contact.status = status as any;
-          if (name) contact.name = name;
+          Object.assign(contact, updateData);
           saveLocalDB(db);
         }
         return;
      }
-     const updateData: any = { status };
-     if (name) updateData.name = name;
      await supabase.from('contacts').update(updateData).eq('id', contactId);
   },
 
@@ -194,7 +177,6 @@ export const chatService = {
     await supabase.from('contacts').update({ case_status: notes }).eq('id', contactId);
   },
 
-  // NOVO: Alternar se a IA responde ou não
   toggleAiStatus: async (contactId: string, paused: boolean) => {
     if (!isSupabaseConfigured || contactId.startsWith('local-')) {
        const db = getLocalDB();
@@ -209,20 +191,13 @@ export const chatService = {
   },
 
   getAllContacts: async (): Promise<Contact[]> => {
-    if (!isSupabaseConfigured) {
-      return getLocalDB().contacts;
-    }
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
-      .order('updated_at', { ascending: false });
-
-    if (error) return getLocalDB().contacts;
+    if (!isSupabaseConfigured) return getLocalDB().contacts;
+    const { data } = await supabase.from('contacts').select('*').order('updated_at', { ascending: false });
     return data ? data.map(mapDbContact) : [];
   },
 
   getDashboardStats: async () => {
-    const contacts = await chatService.getAllContacts(); 
+    const contacts = await chatService.getAllContacts();
     return {
       total: contacts.length,
       triaged: contacts.filter(c => c.status === 'triaged').length,

@@ -15,14 +15,15 @@ export interface Contact {
   avatar: string;
   unreadCount: number;
   status: 'new' | 'triaged' | 'urgent';
-  caseStatus?: string; // Informações sobre andamento processual
-  aiPaused?: boolean; // NOVO: Se true, a IA não responde automaticamente (Intervenção Humana)
+  caseStatus?: string; // Informações sobre andamento processual (Advogado -> Cliente)
+  legalSummary?: string; // Memória da IA sobre o caso (IA -> IA)
+  aiPaused?: boolean; // Se true, a IA não responde automaticamente
 }
 
 export interface TeamMember {
   id: string;
   name: string;
-  role: string; // ex: Advogado Previdenciário, Secretária
+  role: string;
   phone?: string;
   active: boolean;
 }

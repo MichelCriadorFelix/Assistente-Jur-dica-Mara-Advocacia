@@ -20,7 +20,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Inicialização da Sessão
   useEffect(() => {
     const initSession = async () => {
       const storedId = localStorage.getItem('mara_contact_id');
@@ -36,22 +35,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
+           // Boas-vindas Personalizadas se possível
+           const welcomeText = details?.name && details.name !== 'Novo Cliente' && details.name !== 'User'
+              ? `Olá novamente, ${details.name}! Como posso ajudar com seu caso hoje?`
+              : 'Olá! Sou a Mara, advogada virtual da Felix e Castro Advocacia. ⚖️\n\nPosso te ajudar com INSS, Causas Trabalhistas ou Família. Por favor, me conte o que está acontecendo (pode ser por áudio 🎙️).';
+
            const initialMsg: Message = {
              id: 'init-welcome', 
              role: 'model', 
-             content: 'Olá! Sou a Mara, assistente da Felix e Castro Advocacia. ⚖️\n\nEstou aqui para ouvir você. Por favor, me conte brevemente: **O que aconteceu ou qual é a sua dúvida hoje?**\n\n(Pode digitar ou mandar um áudio clicando no microfone 🎙️)', 
+             content: welcomeText, 
              type: 'text', 
              timestamp: new Date()
            };
            setMessages([initialMsg]);
         }
       } catch (e) {
-        console.error("Falha ao iniciar sessão de chat", e);
+        console.error("Falha ao iniciar sessão", e);
       }
     };
     initSession();
 
-    // Polling para checar se advogado respondeu
     const interval = setInterval(async () => {
       const storedId = localStorage.getItem('mara_contact_id');
       if (storedId) {
@@ -68,13 +71,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
     return () => clearInterval(interval);
   }, []);
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
   const handleResetConversation = () => {
-    if (confirm("Tem certeza que deseja apagar essa conversa e iniciar um novo teste do zero?")) {
+    if (confirm("Deseja iniciar um novo atendimento?")) {
       localStorage.removeItem('mara_contact_id');
       window.location.reload();
     }
@@ -84,7 +86,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   const handleSendMessage = async (text?: string, audioBlob?: Blob, mimeType?: string) => {
     if ((!text && !audioBlob) || !contactId || isLoading) return;
 
-    // 1. Cria objeto da mensagem do usuário
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -94,8 +95,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       audioUrl: audioBlob ? URL.createObjectURL(audioBlob) : undefined
     };
 
-    // 2. Atualiza UI e salva msg
-    const previousHistory = [...messages]; 
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsLoading(true);
@@ -103,7 +102,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
     try {
       await chatService.saveMessage(contactId, userMsg);
 
-      // 3. Verifica se a IA está PAUSADA
+      // Atualiza contexto para garantir que a IA tenha os dados mais recentes do banco
       const freshDetails = await chatService.getContactDetails(contactId);
       setContactDetails(freshDetails);
 
@@ -112,30 +111,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         return; 
       }
 
-      // 4. Prepara áudio para envio
       let audioBase64: string | undefined;
-      let cleanMime = 'audio/webm'; // Default seguro
+      let cleanMime = 'audio/webm';
 
       if (audioBlob) {
-        // Limpa o mimeType para remover codecs (ex: audio/webm;codecs=opus -> audio/webm)
-        // O Gemini prefere tipos MIME simples.
-        if (mimeType) {
-          cleanMime = mimeType.split(';')[0].trim();
-        }
-
+        if (mimeType) cleanMime = mimeType.split(';')[0].trim();
         audioBase64 = await new Promise((resolve) => {
           const reader = new FileReader();
           reader.readAsDataURL(audioBlob);
           reader.onloadend = () => {
              const base64 = reader.result as string;
-             // Remove o cabeçalho data:audio/...;base64,
              resolve(base64.split(',')[1]); 
           };
         });
       }
 
-      const historyForAI = previousHistory.filter(m => m.id !== 'init-welcome');
-      const caseStatus = freshDetails?.caseStatus || "";
+      // Filtra mensagens de sistema puras
+      const historyForAI = messages.filter(m => m.id !== 'init-welcome');
 
       const responseText = await sendMessageToGemini(
         historyForAI, 
@@ -143,10 +135,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         config.systemPrompt,
         async (toolCall) => {
           if (toolCall.name === 'notificar_equipe') {
-             await chatService.updateContactStatus(contactId, 'triaged', toolCall.args.clientName);
+             const { clientName, priority, legalSummary } = toolCall.args;
+             // Atualiza status e salva o resumo jurídico gerado pela IA
+             await chatService.updateContactStatus(contactId, 'triaged', clientName, legalSummary);
+             // Atualiza localmente para refletir nome
+             setContactDetails(prev => prev ? ({ ...prev, name: clientName, status: 'triaged' }) : null);
           }
         },
-        caseStatus
+        freshDetails // Passa o contexto completo (incluindo resumo anterior e status processual)
       );
 
       const botMsg: Message = {
@@ -165,7 +161,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       const errorMsg: Message = {
         id: Date.now().toString(),
         role: 'model',
-        content: "⚠️ Não consegui ouvir seu áudio direito. Tente gravar novamente falando mais perto do microfone ou digite sua dúvida.",
+        content: "Desculpe, tive uma pequena falha de conexão. Pode repetir?",
         type: 'text',
         timestamp: new Date()
       };
@@ -177,13 +173,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
 
   return (
     <div className="flex flex-col h-full bg-[#efeae2] relative overflow-hidden">
-      {/* Background WhatsApp */}
       <div className="absolute inset-0 opacity-10 pointer-events-none" 
            style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")' }}>
       </div>
 
-      {/* Header */}
-      <div className="bg-[#00a884] p-3 flex items-center justify-between shadow-md z-50 text-white relative">
+      <div className="bg-[#008069] p-3 flex items-center justify-between shadow-md z-50 text-white relative">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="p-1 hover:bg-white/20 rounded-full transition-colors">
             <ArrowLeft className="w-6 h-6" />
@@ -193,9 +187,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
              <img src="https://ui-avatars.com/api/?name=Mara+AI&background=0D8ABC&color=fff" alt="Mara" className="w-full h-full rounded-full" />
           </div>
           <div className="flex flex-col">
-            <h1 className="font-semibold text-base leading-tight">Mara (IA Jurídica)</h1>
+            <h1 className="font-semibold text-base leading-tight">
+               {contactDetails?.name && contactDetails.name !== 'Novo Cliente' ? contactDetails.name : 'Mara (Advogada Virtual)'}
+            </h1>
             <span className="text-xs text-white/90 font-medium">
-              {contactDetails?.aiPaused ? '🔴 Atendimento Humano' : (isLoading ? 'Ouvindo áudio...' : 'Online')}
+              {contactDetails?.aiPaused ? '🔴 Atendimento Humano' : (isLoading ? 'Analisando...' : 'Online')}
             </span>
           </div>
         </div>
@@ -206,21 +202,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
             <MoreVertical className="w-5 h-5 cursor-pointer" />
           </button>
           
-          {/* Dropdown Menu */}
           {showMenu && (
-            <div className="absolute right-0 top-12 bg-white rounded-lg shadow-xl py-2 w-56 z-50 animate-in fade-in slide-in-from-top-2 border border-gray-100">
+            <div className="absolute right-0 top-12 bg-white rounded-lg shadow-xl py-2 w-56 z-50 animate-in fade-in slide-in-from-top-2 border border-gray-100 text-gray-800">
               <button 
                 onClick={handleResetConversation}
                 className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 flex items-center gap-2 transition-colors font-medium"
               >
-                <Trash2 className="w-4 h-4" /> Reiniciar Conversa
+                <Trash2 className="w-4 h-4" /> Novo Atendimento
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Área de Mensagens */}
       <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3 pb-20 scroll-smooth">
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
@@ -260,15 +254,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
       <div className="absolute bottom-0 w-full bg-[#f0f2f5] p-2 flex items-center gap-2 z-20 border-t border-gray-200">
         <input
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputText)}
-          placeholder="Conte o que houve..."
-          className="flex-1 rounded-lg border-none px-4 py-3 focus:ring-1 focus:ring-whatsapp-green outline-none bg-white shadow-sm text-gray-700 placeholder-gray-400"
+          placeholder="Mensagem..."
+          className="flex-1 rounded-lg border-none px-4 py-3 focus:ring-1 focus:ring-[#00a884] outline-none bg-white shadow-sm text-gray-700 placeholder-gray-400"
           disabled={isLoading}
         />
         
@@ -276,7 +269,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           <button 
             onClick={() => handleSendMessage(inputText)}
             disabled={isLoading}
-            className="p-3 bg-whatsapp-green rounded-full text-white shadow-md hover:bg-emerald-600 transition disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
+            className="p-3 bg-[#00a884] rounded-full text-white shadow-md hover:bg-[#008f6f] transition disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
           >
             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
