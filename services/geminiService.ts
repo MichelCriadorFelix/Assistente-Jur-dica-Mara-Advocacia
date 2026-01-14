@@ -83,27 +83,29 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
-// --- IA NATIVA 4.0 (FLUXO NATURAL & CONTEXTUAL) ---
+// --- IA NATIVA 4.0 (FLUXO NATURAL & CONTEXTUAL - FALLBACK MELHORADO) ---
 const runNativeMara = async (
   history: Message[], 
   lastUserText: string,
   onToolCall?: (toolCall: any) => void,
   caseContext?: string
 ): Promise<string> => {
-  console.log("[Mara Native] Analisando intenção natural...");
+  console.log("[Mara Native] Analisando intenção natural (Modo Offline/Fallback)...");
   
   // 1. Resposta sobre Prontuário (Contexto Prioritário)
   if (caseContext && lastUserText.toLowerCase().match(/(como está|andamento|novidades|processo|perícia|audiência|status)/)) {
      return `Verifiquei aqui no sistema sobre o seu caso:\n\n"${caseContext}"\n\nQualquer outra dúvida sobre isso, pode me perguntar.`;
   }
   
+  // Limpeza do texto para melhor detecção (remove exclamações, interrogações para match)
   const lower = lastUserText.toLowerCase().trim();
+  const cleanText = lower.replace(/[!?.s]/g, ' ').trim(); 
   const lastBotMsg = [...history].reverse().find(m => m.role === 'model')?.content || "";
   
-  // 2. Detecção de Intent e Sentimento Simples
-  // Se for apenas saudação, seja receptiva
-  if (history.length < 3 || ['oi', 'olá', 'bom dia', 'tarde', 'noite', 'tudo bem'].some(x => lower === x || lower.startsWith(x + ' '))) {
-    return "Olá! Aqui é a Mara. ⚖️\n\nEstou pronta para te ouvir. Pode me contar o que aconteceu ou qual sua dúvida hoje?";
+  // 2. DETECÇÃO DE SAUDAÇÃO (Robustez: Aceita 'oi!', 'boa tarde', etc.)
+  // Regex procura palavras inteiras
+  if (/(oi|ola|olá|bom dia|boa tarde|boa noite|tudo bem|ei|opa)\b/.test(lower)) {
+    return "Olá! Sou a Mara. 👋\n\nEstou aqui para ajudar. Pode me contar o que aconteceu ou qual sua dúvida jurídica?";
   }
 
   // 3. Lógica Contextual (Simulada sem LLM)
@@ -111,28 +113,28 @@ const runNativeMara = async (
   // --- INSS ---
   if (lower.match(/(inss|aposenta|benefício|loas|doença|encostado|perícia|auxílio)/)) {
       if (lower.includes("negado") || lower.includes("cortaram")) {
-          return "Poxa, ter o benefício negado é muito frustrante. 😟 Mas podemos reverter.\n\nVocê tem os laudos médicos atuais e a carta de indeferimento do INSS?";
+          return "Poxa, ter o benefício negado é muito frustrante. 😟 Mas podemos tentar reverter.\n\nVocê tem os laudos médicos atuais e a carta do INSS?";
       }
-      return "Entendo, questões com o INSS exigem cuidado. \n\nPara o Dr. Michel analisar, me diga: Qual a sua idade hoje e há quanto tempo você contribui?";
+      return "Entendo. Para o Dr. Michel analisar essa questão do INSS, me diga: Qual a sua idade hoje e há quanto tempo você contribui?";
   }
 
   // --- TRABALHISTA ---
   if (lower.match(/(trabalh|empresa|patrão|demi|verba|justa causa|fgts|carteira|salário)/)) {
       if (lower.includes("não pagou") || lower.includes("atrasado")) {
-          return "Isso é grave. O salário é sagrado. \n\nEsse atraso acontece há muito tempo? Sua carteira é assinada?";
+          return "Isso é grave. O salário é sagrado. 😡\n\nEsse atraso acontece há muito tempo? Sua carteira é assinada?";
       }
       if (lower.includes("demiti") || lower.includes("mandou embora")) {
          return "Sinto muito por isso. Perder o emprego é difícil. \n\nVocê sabe se eles vão pagar todos os seus direitos na rescisão? Você tinha carteira assinada?";
       }
-      return "Certo, assunto trabalhista. \n\nPara eu passar para a Dra. Luana: Você ainda está trabalhando lá ou já saiu?";
+      return "Certo. Para eu passar para a Dra. Luana: Você ainda está trabalhando lá ou já saiu?";
   }
 
   // --- FAMÍLIA ---
   if (lower.match(/(família|divórcio|separação|pensão|guarda|inventário|herança|ex-marido|ex-mulher)/)) {
       if (lower.includes("não paga") && lower.includes("pensão")) {
-          return "Entendo perfeitamente sua preocupação. A pensão é direito da criança. \n\nJá existe um valor fixado pelo juiz ou era apenas um acordo de boca?";
+          return "Entendo sua preocupação. A pensão é direito da criança. \n\nJá existe um valor fixado pelo juiz ou era apenas um acordo de boca?";
       }
-      return "Compreendo. Assuntos de família mexem com a gente. \n\nPara a Dra. Flávia te orientar melhor: Existem filhos menores de idade envolvidos nesse caso?";
+      return "Compreendo. Assuntos de família são delicados. \n\nPara a Dra. Flávia te orientar: Existem filhos menores de idade envolvidos nesse caso?";
   }
 
   // Continuidade de conversa (Memória Curta Simulada)
@@ -144,8 +146,9 @@ const runNativeMara = async (
       return "Entendido. A falta de registro ou pagamento errado gera muitos direitos. \n\nJá passei seu relato para a Dra. Luana. Vamos analisar se cabe uma ação urgente. A Fabrícia vai entrar em contato para agendar.";
   }
 
-  // Fallback genérico, mas educado
-  return "Entendi. Pode me dar mais alguns detalhes sobre isso? Quanto mais você me contar, melhor consigo explicar para o advogado responsável.";
+  // Fallback HONESTO: Se não entendeu, diz que não entendeu.
+  // Não diz "Entendi" se não entendeu.
+  return "Desculpe, não consegui entender exatamente o contexto. 😕\n\nVocê poderia me explicar com outras palavras o que aconteceu? É sobre trabalho, INSS ou família?";
 };
 
 // Helper para finalizar o atendimento no modo nativo
