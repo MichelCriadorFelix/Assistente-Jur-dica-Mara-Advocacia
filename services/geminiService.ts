@@ -3,12 +3,12 @@ import { Message, TeamMember } from "../types";
 import { DEFAULT_TEAM } from "../constants";
 
 // LISTA DE MODELOS (ORDEM DE PRIORIDADE)
-// Priorizamos modelos com melhor raciocínio e janelas de contexto
+// 'flash' é muito mais rápido e robusto para áudio em conversas curtas que 'pro'
 const MODEL_CANDIDATES = [
-  'gemini-1.5-pro',            // Melhor raciocínio
-  'gemini-1.5-flash',          // Mais rápido
-  'gemini-2.0-flash-exp',      // Experimental rápido
-  'gemini-1.5-flash-latest'
+  'gemini-1.5-flash',          
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-pro',            
+  'gemini-2.0-flash-exp'
 ];
 
 const cleanKey = (key: string | undefined): string => {
@@ -86,7 +86,7 @@ const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
 // --- FALLBACK SIMPLES (QUANDO NÃO HÁ CONEXÃO MESMO) ---
 const simpleFallback = (text: string): string => {
-  return "Desculpe, estou com uma instabilidade momentânea na minha conexão com o sistema inteligente. Poderia repetir ou enviar em texto se foi áudio? Se preferir, posso pedir para a secretária te ligar.";
+  return "Desculpe, a conexão com a inteligência falhou. Poderia tentar novamente em instantes? Se preferir, digite sua mensagem.";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
@@ -114,15 +114,12 @@ export const sendMessageToGemini = async (
   
   let apiKeys = getAvailableApiKeys();
   
-  // Se não tem chave, cai no fallback imediatamente
   if (apiKeys.length === 0) {
-    return "⚠️ ERRO DE SISTEMA: Nenhuma chave de API configurada. Por favor, avise o administrador.";
+    return "⚠️ ERRO DE SISTEMA: Nenhuma chave de API configurada. Avise o suporte.";
   }
 
   apiKeys = shuffleArray(apiKeys);
   const modelsToTry = MODEL_CANDIDATES;
-  
-  // Limita histórico para evitar sobrecarga de tokens, mas mantém contexto suficiente
   const recentHistory = history.slice(-15); 
   
   // INJEÇÃO DINÂMICA DE CONTEXTO
@@ -142,28 +139,27 @@ export const sendMessageToGemini = async (
   }
 
   // Prepara histórico no formato do Gemini SDK
+  // IMPORTANTE: Transformamos áudios ANTIGOS em texto placeholder para não gastar tokens ou confundir o modelo com blobs expirados
   const chatHistory: Content[] = recentHistory
     .filter(m => m.role !== 'system')
     .map(m => ({
       role: m.role,
-      parts: [{ text: m.type === 'audio' ? '(Áudio do usuário - responda ao conteúdo transcrito)' : m.content }]
+      parts: [{ text: m.type === 'audio' ? '[O USUÁRIO ENVIOU UM ÁUDIO ANTERIORMENTE - CONSIDERE O CONTEXTO DA RESPOSTA DADA]' : m.content }]
     }));
 
-  // Monta a mensagem atual (Texto + Áudio se houver)
+  // Monta a mensagem ATUAL
   const currentParts: Part[] = [];
   
   if (newMessage.audioBase64) {
-    // IMPORTANTE: Envia o áudio como parte inlineData
+    // Envia o áudio como inlineData
     currentParts.push({
       inlineData: {
         mimeType: newMessage.mimeType || 'audio/webm',
         data: newMessage.audioBase64
       }
     });
-    // Adiciona dica de texto para garantir que o modelo saiba o que fazer
-    if (!newMessage.text) {
-        currentParts.push({ text: "Por favor, ouça este áudio atentamente, transcreva mentalmente o que o cliente disse e responda como a Mara Advogada." });
-    }
+    // Instrução explícita para o modelo processar o áudio
+    currentParts.push({ text: "INSTRUÇÃO DE SISTEMA: O usuário enviou um áudio anexado. Ouça-o, transcreva mentalmente e responda à pergunta ou comentário feito no áudio." });
   }
   
   if (newMessage.text) {
@@ -176,20 +172,18 @@ export const sendMessageToGemini = async (
 
     for (const model of modelsToTry) {
         try {
-            console.log(`[Mara] Tentando modelo ${model}...`);
             const chat = ai.chats.create({
                 model: model,
                 config: { 
                   systemInstruction: dynamicPrompt,
                   tools, 
-                  // Removido thinkingConfig para evitar incompatibilidade
-                  temperature: 0.7, // Criatividade moderada para ser natural
+                  temperature: 0.6, // Levemente criativo, mas focado
                 },
                 history: chatHistory
             });
 
-            // Timeout de segurança
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 20000));
+            // Timeout de 18s (suficiente para áudio)
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 18000));
             
             const apiPromise = chat.sendMessage({ message: currentParts });
             const result: any = await Promise.race([apiPromise, timeoutPromise]);
@@ -199,11 +193,8 @@ export const sendMessageToGemini = async (
             // Processa chamada de ferramenta (Tool Calling)
             if (result.functionCalls && result.functionCalls.length > 0) {
                 const call = result.functionCalls[0];
-                console.log("[Mara] Tool Call:", call.name);
-                
                 if (onToolCall) onToolCall({ name: call.name, args: call.args });
                 
-                // Retorna confirmação para a IA finalizar a frase
                 const fnResp = await chat.sendMessage({
                   message: [{ functionResponse: { name: call.name, response: { result: "Success" } } }]
                 });
@@ -215,10 +206,9 @@ export const sendMessageToGemini = async (
             return responseText;
 
         } catch (error: any) {
-            console.warn(`[Mara] Erro com modelo ${model}:`, error.message);
             const isQuota = error.message?.includes('429') || error.message?.includes('Quota');
-            // Se for cota, tenta outra chave. Se for outro erro, tenta outro modelo.
-            if (isQuota) break; 
+            if (isQuota) break; // Troca de chave se for cota
+            // Se não for cota (ex: modelo não suporta áudio), tenta o próximo modelo
         }
     }
   }

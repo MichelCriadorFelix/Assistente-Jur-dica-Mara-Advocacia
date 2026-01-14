@@ -60,7 +60,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           if (history.length > prev.length) return history;
           return prev;
         });
-        // Atualiza status (para ver se a IA foi pausada)
         const det = await chatService.getContactDetails(storedId);
         setContactDetails(det);
       }
@@ -77,7 +76,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   const handleResetConversation = () => {
     if (confirm("Tem certeza que deseja apagar essa conversa e iniciar um novo teste do zero?")) {
       localStorage.removeItem('mara_contact_id');
-      // Força recarregamento para garantir estado limpo
       window.location.reload();
     }
     setShowMenu(false);
@@ -105,19 +103,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
     try {
       await chatService.saveMessage(contactId, userMsg);
 
-      // 3. Verifica se a IA está PAUSADA (Intervenção Humana)
-      // Recarrega detalhes para ter certeza absoluta do estado atual
+      // 3. Verifica se a IA está PAUSADA
       const freshDetails = await chatService.getContactDetails(contactId);
       setContactDetails(freshDetails);
 
       if (freshDetails?.aiPaused) {
         setIsLoading(false);
-        return; // PARE AQUI. Não chame o Gemini.
+        return; 
       }
 
-      // 4. Se não pausada, segue fluxo normal da IA
+      // 4. Prepara áudio para envio
       let audioBase64: string | undefined;
+      let cleanMime = 'audio/webm'; // Default seguro
+
       if (audioBlob) {
+        // Limpa o mimeType para remover codecs (ex: audio/webm;codecs=opus -> audio/webm)
+        // O Gemini prefere tipos MIME simples.
+        if (mimeType) {
+          cleanMime = mimeType.split(';')[0].trim();
+        }
+
         audioBase64 = await new Promise((resolve) => {
           const reader = new FileReader();
           reader.readAsDataURL(audioBlob);
@@ -132,10 +137,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       const historyForAI = previousHistory.filter(m => m.id !== 'init-welcome');
       const caseStatus = freshDetails?.caseStatus || "";
 
-      // Passa explicitamente o mimeType capturado pelo recorder
       const responseText = await sendMessageToGemini(
         historyForAI, 
-        { text, audioBase64, mimeType }, 
+        { text, audioBase64, mimeType: cleanMime }, 
         config.systemPrompt,
         async (toolCall) => {
           if (toolCall.name === 'notificar_equipe') {
@@ -161,7 +165,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       const errorMsg: Message = {
         id: Date.now().toString(),
         role: 'model',
-        content: "⚠️ Falha na conexão ou áudio ilegível. Tente escrever.",
+        content: "⚠️ Não consegui ouvir seu áudio direito. Tente gravar novamente falando mais perto do microfone ou digite sua dúvida.",
         type: 'text',
         timestamp: new Date()
       };
@@ -178,7 +182,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
            style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")' }}>
       </div>
 
-      {/* Header - Z-Index Aumentado para 50 para garantir sobreposição ao chat */}
+      {/* Header */}
       <div className="bg-[#00a884] p-3 flex items-center justify-between shadow-md z-50 text-white relative">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="p-1 hover:bg-white/20 rounded-full transition-colors">
@@ -191,7 +195,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           <div className="flex flex-col">
             <h1 className="font-semibold text-base leading-tight">Mara (IA Jurídica)</h1>
             <span className="text-xs text-white/90 font-medium">
-              {contactDetails?.aiPaused ? '🔴 Atendimento Humano' : (isLoading ? 'Ouvindo...' : 'Online')}
+              {contactDetails?.aiPaused ? '🔴 Atendimento Humano' : (isLoading ? 'Ouvindo áudio...' : 'Online')}
             </span>
           </div>
         </div>

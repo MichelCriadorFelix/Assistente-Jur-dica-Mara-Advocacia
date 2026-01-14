@@ -25,7 +25,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioRecorded, disabled
         return type;
       }
     }
-    return ''; // Deixa o navegador decidir o padrão
+    return 'audio/webm'; // Fallback padrão
   };
 
   const startRecording = useCallback(async () => {
@@ -34,32 +34,46 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioRecorded, disabled
       const mimeType = getSupportedMimeType();
       mimeTypeRef.current = mimeType;
 
-      const options = mimeType ? { mimeType, audioBitsPerSecond: 128000 } : undefined;
-      const mediaRecorder = new MediaRecorder(stream, options);
+      // 128kbps para boa qualidade de voz sem ficar pesado
+      const options = { mimeType, audioBitsPerSecond: 128000 };
       
-      mediaRecorderRef.current = mediaRecorder;
+      try {
+        mediaRecorderRef.current = new MediaRecorder(stream, options);
+      } catch (e) {
+        // Fallback sem options se o navegador não suportar bitrate
+        mediaRecorderRef.current = new MediaRecorder(stream);
+      }
+      
       chunksRef.current = [];
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            chunksRef.current.push(e.data);
+          }
+        };
 
-      mediaRecorder.onstop = () => {
-        const type = mimeTypeRef.current || 'audio/webm';
-        const blob = new Blob(chunksRef.current, { type });
-        onAudioRecorded(blob, type);
-        
-        // Limpeza
-        stream.getTracks().forEach(track => track.stop());
-      };
+        mediaRecorderRef.current.onstop = () => {
+          const type = mimeTypeRef.current || 'audio/webm';
+          const blob = new Blob(chunksRef.current, { type });
+          
+          if (blob.size < 500) {
+             console.warn("Áudio muito curto ou vazio descartado.");
+          } else {
+             onAudioRecorded(blob, type);
+          }
+          
+          // Limpeza das faixas para desligar o microfone (ícone vermelho do navegador)
+          stream.getTracks().forEach(track => track.stop());
+        };
 
-      mediaRecorder.start();
-      setIsRecording(true);
+        // Timeslice de 1000ms para garantir coleta de dados em pedaços
+        mediaRecorderRef.current.start(1000);
+        setIsRecording(true);
+      }
     } catch (err) {
       console.error("Error accessing microphone:", err);
-      alert("Erro ao acessar microfone. Verifique se deu permissão no navegador.");
+      alert("Erro ao acessar microfone. Verifique permissões.");
     }
   }, [onAudioRecorded]);
 
@@ -77,10 +91,10 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioRecorded, disabled
         disabled={disabled}
         className={`p-3 rounded-full transition-all duration-300 shadow-md ${
           isRecording 
-            ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+            ? 'bg-red-500 hover:bg-red-600 animate-pulse scale-110' 
             : 'bg-whatsapp-green hover:bg-emerald-600'
         } disabled:opacity-50 disabled:cursor-not-allowed`}
-        title={isRecording ? "Parar Gravação" : "Gravar Áudio"}
+        title={isRecording ? "Enviar Áudio" : "Gravar Áudio"}
       >
         {isRecording ? (
           <Square className="w-5 h-5 text-white" fill="currentColor" />
