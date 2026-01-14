@@ -1,14 +1,12 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// LISTA DE MODELOS OTIMIZADA (Prioridade: Gratuito, Rápido, Recente)
-// 'gemini-2.0-flash-exp' é a versão mais nova, rápida e inteligente do tier gratuito.
+// LISTA DE MODELOS (ORDEM DE PRIORIDADE ALTERADA PARA ESTABILIDADE)
 const MODEL_CANDIDATES = [
-  'gemini-2.0-flash-exp',      // Geração 2.0 (Mais atual)
-  'gemini-1.5-flash',          // Estável e Rápido
-  'gemini-1.5-flash-latest',   // Alias para a última versão estável
-  'gemini-1.5-flash-8b',       // Versão leve (baixa latência)
-  'gemini-1.5-pro-latest',     // Versão Pro (se a Flash falhar)
+  'gemini-1.5-flash',          // PRINCIPAL: Mais rápido, estável e gratuito
+  'gemini-1.5-flash-latest',   // Fallback seguro
+  'gemini-2.0-flash-exp',      // Experimental (Pode dar erro 404/403 dependendo da conta)
+  'gemini-1.5-pro',            // Mais inteligente, mas com rate limit menor
 ];
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -19,34 +17,30 @@ const cleanKey = (key: string | undefined): string => {
 };
 
 export const getAvailableApiKeys = (): string[] => {
-  // Coleta chaves de todas as fontes possíveis
   const allPossibleValues: string[] = [];
 
-  // 1. Variáveis injetadas pelo Vite (process.env agora contém API_KEY_1, API_KEY_2, etc.)
+  // 1. Process Env (Vite Injected)
   if (typeof process !== 'undefined' && process.env) {
     Object.values(process.env).forEach(val => {
       if (typeof val === 'string') allPossibleValues.push(val);
     });
   }
 
-  // 2. Fallback para import.meta.env (padrão Vite)
+  // 2. Import Meta Env
   if ((import.meta as any).env) {
      Object.values((import.meta as any).env).forEach((val: any) => {
        if (typeof val === 'string') allPossibleValues.push(val);
      });
   }
 
-  // 3. LocalStorage (Manual)
+  // 3. LocalStorage
   const localKey = localStorage.getItem('mara_gemini_api_key');
   if (localKey) allPossibleValues.push(localKey);
 
-  // FILTRO INTELIGENTE:
-  // Só aceita strings que parecem chaves do Google (Começam com 'AIza' e são longas)
   const validKeys = allPossibleValues
     .map(k => cleanKey(k))
     .filter(k => k && k.length > 20 && k.startsWith('AIza'));
 
-  // Remove duplicatas
   return [...new Set(validKeys)];
 };
 
@@ -69,30 +63,39 @@ const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
   const keys = getAvailableApiKeys();
-  if (keys.length === 0) return { success: false, message: "Nenhuma chave válida (AIza...) encontrada nas variáveis API_KEY_*." };
+  if (keys.length === 0) return { success: false, message: "Nenhuma chave AIza encontrada." };
+
+  let lastDetailedError = "";
 
   for (const apiKey of keys) {
-    // Configuração otimizada para Gemini 2.0/1.5
     const ai = new GoogleGenAI({ apiKey });
     
+    // Tenta conectar com o modelo mais estável primeiro
     for (const modelName of MODEL_CANDIDATES) {
       try {
         const chat = ai.chats.create({ model: modelName, history: [] });
-        await chat.sendMessage({ message: "Ping" }); // Simplificado
+        await chat.sendMessage({ message: "Ping" }); 
         
         localStorage.setItem('mara_working_model', modelName);
         
         return { 
           success: true, 
-          message: `Conectado! Modelo Otimizado: ${modelName}`, 
+          message: `CONECTADO! Modelo: ${modelName}`, 
           keyUsed: apiKey.slice(-4) 
         };
       } catch (e: any) {
-        // Ignora erros silenciosamente no loop de teste, tenta o próximo
+        console.error(`Falha ao testar chave ...${apiKey.slice(-4)} no modelo ${modelName}:`, e);
+        // Captura o erro real do Google para mostrar ao usuário se tudo falhar
+        lastDetailedError = e.message || JSON.stringify(e);
       }
     }
   }
-  return { success: false, message: "Todas as chaves falharam. Verifique se a API 'Google Generative AI' está ativa no Google Cloud." };
+
+  // Se chegou aqui, nada funcionou. Retorna o erro real.
+  return { 
+    success: false, 
+    message: `Falha Google: ${lastDetailedError.slice(0, 150)}...` 
+  };
 };
 
 export const sendMessageToGemini = async (
@@ -103,13 +106,12 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   const apiKeys = getAvailableApiKeys();
-  if (apiKeys.length === 0) return "⚠️ **Erro de Configuração**: Nenhuma chave de API encontrada (API_KEY_*).";
+  if (apiKeys.length === 0) return "⚠️ **Erro**: Nenhuma chave API encontrada.";
 
-  // Lógica de Preferência com Fallback Robusto
   const savedModel = localStorage.getItem('mara_working_model');
-  // Se tiver um modelo salvo, tenta ele primeiro. Se não, começa do topo da lista (Gemini 2.0)
-  // Removemos duplicatas para não tentar o mesmo modelo duas vezes
   const preferredModel = savedModel && MODEL_CANDIDATES.includes(savedModel) ? savedModel : MODEL_CANDIDATES[0];
+  
+  // Lista de tentativas: Preferido -> Flash -> Resto
   const modelsToTry = [preferredModel, ...MODEL_CANDIDATES.filter(m => m !== preferredModel)];
 
   const chatHistory: Content[] = history
@@ -142,53 +144,33 @@ export const sendMessageToGemini = async (
                 config: { 
                   systemInstruction, 
                   tools,
-                  // Configurações de Otimização (Thinking Budget desativado para latência baixa em Flash)
                   thinkingConfig: { thinkingBudget: 0 } 
                 },
                 history: chatHistory
             });
 
             const result = await chat.sendMessage({ message: currentParts });
-            
             let responseText = result.text || "";
 
             if (result.functionCalls && result.functionCalls.length > 0) {
                 const call = result.functionCalls[0];
                 if (onToolCall) onToolCall({ name: call.name, args: call.args });
-                
                 const fnResp = await chat.sendMessage({
                   message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
                 });
                 responseText = fnResp.text || "";
             }
 
-            // Sucesso! Atualiza o modelo preferido se mudou
-            if (model !== savedModel) {
-                localStorage.setItem('mara_working_model', model);
-                console.log(`[Mara] Modelo atualizado para: ${model}`);
-            }
-
+            if (model !== savedModel) localStorage.setItem('mara_working_model', model);
             return responseText;
 
         } catch (error: any) {
-            const msg = error.message || "";
-            lastError = msg;
-            
-            // Se o modelo salvo falhar (ex: 404), limpa a preferência imediatamente para não tentar de novo
-            if (model === savedModel) {
-               localStorage.removeItem('mara_working_model');
-            }
-
-            // Se for erro de cota (429), pausa breve e tenta outra chave/modelo
-            if (msg.includes('429') || msg.includes('Quota')) {
-                await sleep(1000);
-                break; // Sai do loop de modelos desta chave, vai para próxima chave
-            }
-            
-            // Se for 404 (Modelo não encontrado), apenas continua o loop para o próximo modelo
+            lastError = error.message || "Erro desconhecido";
+            // Se erro for 429 (Cota), tenta próxima chave imediatamente
+            if (lastError.includes('429') || lastError.includes('Quota')) break;
         }
     }
   }
 
-  return `⚠️ **Mara Indisponível**\n\nNão consegui conectar com nenhum modelo (Gemini 2.0/1.5).\nErro final: ${lastError.slice(0, 100)}`;
+  return `⚠️ **Erro de Conexão**\n\nO Google recusou a conexão.\nDetalhe: ${lastError.slice(0, 100)}`;
 };
