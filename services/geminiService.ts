@@ -102,8 +102,9 @@ export const sendMessageToGemini = async (
   }
 
   try {
+    // Usando modelo estável 'gemini-2.0-flash-exp' ou 'gemini-1.5-flash' se o 2.0 falhar
     const chat = ai.chats.create({
-      model: 'gemini-2.5-flash-preview', // Or try 'gemini-1.5-flash' if 2.5 is not enabled in your key
+      model: 'gemini-2.0-flash-exp', 
       config: {
         systemInstruction: systemInstruction,
         tools: tools,
@@ -145,10 +146,15 @@ export const sendMessageToGemini = async (
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     
+    // Tratamento de erros amigável
     if (error.message?.includes('403') || error.message?.includes('API key')) {
-         return "Erro de Autenticação (403): Sua Chave de API (VITE_API_KEY_1) parece inválida ou não tem permissão para o modelo 'gemini-2.5-flash-preview'. Tente gerar uma nova chave no Google AI Studio.";
+         return "🔒 Erro de Permissão: Sua chave de API não é válida ou não tem acesso ao modelo. Verifique no Google AI Studio.";
+    }
+    
+    if (error.message?.includes('404') || error.message?.includes('not found')) {
+         return "❌ Erro de Modelo: O modelo de IA configurado está temporariamente indisponível. Tente novamente em alguns instantes.";
     }
 
-    return `Erro técnico: ${error.message || 'Desconhecido'}`;
+    return `⚠️ Erro Técnico: Não foi possível processar sua solicitação no momento.`;
   }
 };

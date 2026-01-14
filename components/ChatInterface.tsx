@@ -119,6 +119,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
 
     } catch (error) {
       console.error(error);
+      // Fallback UI message in case of crash
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: 'model',
+        content: "Desculpe, tive um erro de conexão momentâneo. Pode repetir?",
+        type: 'text',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
@@ -154,6 +163,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3">
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
+          // Clean JSON errors from display if they slipped through
+          const displayText = msg.content.startsWith('{"error"') ? "⚠️ Erro técnico no servidor." : msg.content;
+          
           return (
             <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
               <div 
@@ -169,7 +181,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
                     <audio controls src={msg.audioUrl} className="w-full h-8" />
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{displayText}</p>
                 )}
                 <span className="text-[10px] text-gray-500 block text-right mt-1">
                   {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
