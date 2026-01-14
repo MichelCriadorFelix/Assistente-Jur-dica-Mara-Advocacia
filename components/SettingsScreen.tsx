@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu } from 'lucide-react';
 import { chatService } from '../services/chatService';
 
 const SettingsScreen: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [sbKey, setSbKey] = useState('');
+  const [modelName, setModelName] = useState('gemini-2.0-flash');
   
   // URL já vem hardcoded do services/supabaseClient.ts, mas mostramos aqui apenas para confirmação visual
   const sbUrlDisplay = 'https://drcxpekguouqsoinaoeb.supabase.co';
@@ -15,24 +16,31 @@ const SettingsScreen: React.FC = () => {
 
     const sbk = localStorage.getItem('mara_supabase_key');
     if (sbk) setSbKey(sbk);
+
+    const mod = localStorage.getItem('mara_gemini_model');
+    if (mod) setModelName(mod);
   }, []);
 
   const handleSaveApi = () => {
     if (apiKey.trim()) {
       localStorage.setItem('mara_gemini_api_key', apiKey.trim());
-      alert('Chave de IA salva com sucesso!');
     } else {
       localStorage.removeItem('mara_gemini_api_key');
     }
+    
+    if (modelName.trim()) {
+      localStorage.setItem('mara_gemini_model', modelName.trim());
+    } else {
+      localStorage.setItem('mara_gemini_model', 'gemini-2.0-flash');
+    }
+
+    alert('Configurações da IA salvas!');
   };
 
   const handleSaveSupabase = () => {
     if (sbKey.trim()) {
-      // Salva apenas a KEY, pois a URL já está fixa no código
       localStorage.setItem('mara_supabase_key', sbKey.trim());
-      // Opcional: Salva a URL também caso o código mude no futuro, mas o hardcoded tem prioridade
       localStorage.setItem('mara_supabase_url', sbUrlDisplay); 
-      
       alert('Banco de Dados Conectado! A página será recarregada.');
       window.location.reload();
     } else {
@@ -109,29 +117,50 @@ const SettingsScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 2: AI KEYS */}
-      <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-sm border dark:border-gray-700 opacity-80 hover:opacity-100 transition-opacity">
+      {/* SECTION 2: AI SETTINGS */}
+      <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-sm border dark:border-gray-700">
         <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
           <Key className="w-5 h-5 text-gray-400" /> 
-          Chave da IA (Opcional)
+          Configurações da Inteligência (IA)
         </h2>
         
-        <div className="space-y-4">
-          <p className="text-gray-600 dark:text-gray-300 text-sm">
-             O sistema já possui chaves configuradas internamente. Use este campo apenas se desejar substituir pela sua própria chave pessoal do Google AI Studio.
-          </p>
-          <div className="flex gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Chave API Google (Opcional)</label>
             <input 
               type="password" 
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="AIzaSy... (Deixe vazio para usar a padrão)"
-              className="flex-1 p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+              placeholder="AIzaSy... (Vazio = Padrão)"
+              className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
             />
-            <button onClick={handleSaveApi} className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 flex items-center gap-2 text-sm">
-              <Save className="w-4 h-4" /> Salvar
-            </button>
+            <p className="text-xs text-gray-500 mt-1">Use sua própria chave se as padrões atingirem o limite.</p>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1">
+               <Cpu className="w-3 h-3"/> Modelo IA
+            </label>
+            <input 
+              type="text" 
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+              placeholder="Ex: gemini-2.0-flash"
+              className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm font-mono"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+               Se der erro 404, tente: 
+               <code className="bg-gray-100 dark:bg-gray-900 px-1 rounded mx-1">gemini-1.5-flash-8b</code> 
+               ou 
+               <code className="bg-gray-100 dark:bg-gray-900 px-1 rounded mx-1">gemini-2.0-flash-exp</code>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-4">
+            <button onClick={handleSaveApi} className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 flex items-center gap-2 text-sm">
+              <Save className="w-4 h-4" /> Salvar Configurações IA
+            </button>
         </div>
       </div>
 

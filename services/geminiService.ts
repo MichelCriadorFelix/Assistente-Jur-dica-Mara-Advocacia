@@ -1,11 +1,21 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// Lista de chaves de fallback (Sua nova chave está em primeiro lugar)
+// Lista de chaves de fallback
 const FALLBACK_KEYS = [
   "AIzaSyD-8oeV2Ojwl3a5q9Fe7RkdQ2QROehlljY", // Nova Chave (Prioridade Máxima)
   "AIzaSyAKn6TpoKlcyuLESez4GMSMeconldxfYNk"  // Chave antiga (Backup)
 ];
+
+// Helper para pegar o modelo configurado ou usar o padrão
+const getModelName = (): string => {
+  if (typeof window !== 'undefined') {
+    const local = localStorage.getItem('mara_gemini_model');
+    if (local && local.trim().length > 0) return local.trim();
+  }
+  // Padrão atualizado para 2.0 Flash (Geralmente mais estável e disponível agora)
+  return 'gemini-2.0-flash';
+};
 
 // Helper para coletar TODAS as chaves disponíveis
 const getAvailableApiKeys = (): string[] => {
@@ -25,7 +35,6 @@ const getAvailableApiKeys = (): string[] => {
 
   envs.forEach(env => {
     if (!env) return;
-    // Tenta capturar todas as variações possíveis
     if (env.VITE_API_KEY_2) keys.push(env.VITE_API_KEY_2);
     if (env.VITE_API_KEY_1) keys.push(env.VITE_API_KEY_1);
     if (env.VITE_API_KEY) keys.push(env.VITE_API_KEY);
@@ -65,6 +74,7 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   const apiKeys = getAvailableApiKeys();
+  const modelName = getModelName();
   
   if (apiKeys.length === 0) {
     return "⚠️ Erro Crítico: Nenhuma chave de API encontrada.";
@@ -98,13 +108,9 @@ export const sendMessageToGemini = async (
 
   for (const apiKey of apiKeys) {
     try {
-      // Log discreto para debug (mostra apenas final da chave)
-      console.log(`Tentando conectar com IA usando chave ...${apiKey.slice(-4)}`);
+      console.log(`Tentando conectar com IA (${modelName}) usando chave ...${apiKey.slice(-4)}`);
       
       const ai = new GoogleGenAI({ apiKey });
-
-      // IMPORTANTE: Forçando gemini-1.5-flash pois o 2.0-flash-exp tem limite muito baixo
-      const modelName = 'gemini-1.5-flash'; 
 
       const chat = ai.chats.create({
         model: modelName,
@@ -134,9 +140,14 @@ export const sendMessageToGemini = async (
       const errorMsg = error.message || JSON.stringify(error);
       console.warn(`Falha na chave ...${apiKey.slice(-4)}:`, errorMsg);
 
-      // Continua para a próxima chave se for erro de cota (429)
+      // Se for erro de COTA (429) ou Permissão (403), tenta a próxima chave
       if (errorMsg.includes('429') || errorMsg.includes('403') || errorMsg.includes('Quota')) {
         continue; 
+      }
+      
+      // Se for erro 404 (Modelo não encontrado), não adianta trocar de chave, o nome do modelo está errado.
+      if (errorMsg.includes('404') || errorMsg.includes('not found')) {
+         return `⚠️ Erro de Configuração (404): O modelo '${modelName}' não foi encontrado pelo Google. Vá em Configurações e tente mudar o "Modelo IA" para 'gemini-1.5-flash-8b' ou 'gemini-2.0-flash-exp'.`;
       }
     }
   }
