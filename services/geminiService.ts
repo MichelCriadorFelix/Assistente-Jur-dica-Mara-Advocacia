@@ -83,7 +83,7 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
-// --- IA NATIVA 4.0 (FLUXO NATURAL) ---
+// --- IA NATIVA 4.0 (FLUXO NATURAL & CONTEXTUAL) ---
 const runNativeMara = async (
   history: Message[], 
   lastUserText: string,
@@ -92,22 +92,74 @@ const runNativeMara = async (
 ): Promise<string> => {
   console.log("[Mara Native] Analisando intenção natural...");
   
-  // SE TIVER INFORMAÇÃO DO CASO E O USUÁRIO PERGUNTAR
-  if (caseContext && lastUserText.toLowerCase().match(/(como está|andamento|novidades|processo|perícia|audiência)/)) {
-     return `Olá! Verifiquei aqui no sistema sobre o seu caso:\n\n"${caseContext}"\n\nSe precisar de mais detalhes, posso pedir para o advogado te ligar.`;
+  // 1. Resposta sobre Prontuário (Contexto Prioritário)
+  if (caseContext && lastUserText.toLowerCase().match(/(como está|andamento|novidades|processo|perícia|audiência|status)/)) {
+     return `Verifiquei aqui no sistema sobre o seu caso:\n\n"${caseContext}"\n\nQualquer outra dúvida sobre isso, pode me perguntar.`;
   }
   
   const lower = lastUserText.toLowerCase().trim();
   const lastBotMsg = [...history].reverse().find(m => m.role === 'model')?.content || "";
   
-  if (history.length < 3 || ['oi', 'olá', 'bom dia', 'tarde', 'noite'].some(x => lower.includes(x))) {
-    return "Olá! Sou a Mara, assistente da Felix e Castro. ⚖️\n\nEm vez de opções, prefiro que você me conte: **O que aconteceu ou qual é sua dúvida hoje?** (Pode mandar áudio se preferir).";
+  // 2. Detecção de Intent e Sentimento Simples
+  // Se for apenas saudação, seja receptiva
+  if (history.length < 3 || ['oi', 'olá', 'bom dia', 'tarde', 'noite', 'tudo bem'].some(x => lower === x || lower.startsWith(x + ' '))) {
+    return "Olá! Aqui é a Mara. ⚖️\n\nEstou pronta para te ouvir. Pode me contar o que aconteceu ou qual sua dúvida hoje?";
   }
 
-  // (Lógica anterior mantida...)
-  // ...
-  // Simplificando o fallback para economizar espaço na resposta, mas mantendo a lógica original
-  return "Desculpe, não entendi se é um caso de INSS, Trabalho ou Família. Poderia me explicar um pouco melhor o que houve?";
+  // 3. Lógica Contextual (Simulada sem LLM)
+  
+  // --- INSS ---
+  if (lower.match(/(inss|aposenta|benefício|loas|doença|encostado|perícia|auxílio)/)) {
+      if (lower.includes("negado") || lower.includes("cortaram")) {
+          return "Poxa, ter o benefício negado é muito frustrante. 😟 Mas podemos reverter.\n\nVocê tem os laudos médicos atuais e a carta de indeferimento do INSS?";
+      }
+      return "Entendo, questões com o INSS exigem cuidado. \n\nPara o Dr. Michel analisar, me diga: Qual a sua idade hoje e há quanto tempo você contribui?";
+  }
+
+  // --- TRABALHISTA ---
+  if (lower.match(/(trabalh|empresa|patrão|demi|verba|justa causa|fgts|carteira|salário)/)) {
+      if (lower.includes("não pagou") || lower.includes("atrasado")) {
+          return "Isso é grave. O salário é sagrado. \n\nEsse atraso acontece há muito tempo? Sua carteira é assinada?";
+      }
+      if (lower.includes("demiti") || lower.includes("mandou embora")) {
+         return "Sinto muito por isso. Perder o emprego é difícil. \n\nVocê sabe se eles vão pagar todos os seus direitos na rescisão? Você tinha carteira assinada?";
+      }
+      return "Certo, assunto trabalhista. \n\nPara eu passar para a Dra. Luana: Você ainda está trabalhando lá ou já saiu?";
+  }
+
+  // --- FAMÍLIA ---
+  if (lower.match(/(família|divórcio|separação|pensão|guarda|inventário|herança|ex-marido|ex-mulher)/)) {
+      if (lower.includes("não paga") && lower.includes("pensão")) {
+          return "Entendo perfeitamente sua preocupação. A pensão é direito da criança. \n\nJá existe um valor fixado pelo juiz ou era apenas um acordo de boca?";
+      }
+      return "Compreendo. Assuntos de família mexem com a gente. \n\nPara a Dra. Flávia te orientar melhor: Existem filhos menores de idade envolvidos nesse caso?";
+  }
+
+  // Continuidade de conversa (Memória Curta Simulada)
+  if (lastBotMsg.includes("idade") && lower.match(/\d+/)) {
+      return "Certo. E você tem acesso à senha do site 'Meu INSS' (Gov.br)? Isso ajuda muito na análise do Dr. Michel.";
+  }
+  if (lastBotMsg.includes("carteira") && (lower.includes("sim") || lower.includes("não"))) {
+      if (onToolCall) performHandover(history, lastUserText, "Dra. Luana Castro", onToolCall);
+      return "Entendido. A falta de registro ou pagamento errado gera muitos direitos. \n\nJá passei seu relato para a Dra. Luana. Vamos analisar se cabe uma ação urgente. A Fabrícia vai entrar em contato para agendar.";
+  }
+
+  // Fallback genérico, mas educado
+  return "Entendi. Pode me dar mais alguns detalhes sobre isso? Quanto mais você me contar, melhor consigo explicar para o advogado responsável.";
+};
+
+// Helper para finalizar o atendimento no modo nativo
+const performHandover = (history: Message[], lastText: string, lawyer: string, onToolCall: (t: any) => void) => {
+  const fullSummary = history.filter(m => m.role === 'user').map(m => m.content).join(" | ") + " | " + lastText;
+  onToolCall({
+    name: 'notificar_equipe',
+    args: {
+      clientName: 'Cliente (Triagem Natural)',
+      summary: `TRIAGEM AUTOMÁTICA:\n${fullSummary}`,
+      lawyerName: lawyer,
+      priority: 'Alta'
+    }
+  });
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
