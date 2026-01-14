@@ -32,11 +32,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Initial greeting if new
+           // Initial greeting if new - ATUALIZADO PARA POSTURA MAIS PROFISSIONAL
            const initialMsg: Message = {
              id: 'init', 
              role: 'model', 
-             content: 'Olá! Sou a Mara, assistente virtual da Felix e Castro Advocacia. Como posso ajudar você hoje?', 
+             content: 'Olá! Sou a Mara, assistente jurídica da Felix e Castro Advocacia. Estou aqui para analisar seu caso e verificar seus direitos. O assunto seria sobre INSS (Aposentadoria/Auxílio), Trabalhista ou Família?', 
              type: 'text', 
              timestamp: new Date()
            };
