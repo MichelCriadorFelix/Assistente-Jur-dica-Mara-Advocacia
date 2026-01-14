@@ -1,15 +1,14 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// LISTA DE MODELOS (Auto-Descoberta)
+// LISTA DE MODELOS OTIMIZADA (Prioridade: Gratuito, Rápido, Recente)
+// 'gemini-2.0-flash-exp' é a versão mais nova, rápida e inteligente do tier gratuito.
 const MODEL_CANDIDATES = [
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-001',
-  'gemini-1.5-flash-002',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-pro',
-  'gemini-pro',
-  'gemini-1.0-pro'
+  'gemini-2.0-flash-exp',      // Geração 2.0 (Mais atual)
+  'gemini-1.5-flash',          // Estável e Rápido
+  'gemini-1.5-flash-latest',   // Alias para a última versão estável
+  'gemini-1.5-flash-8b',       // Versão leve (baixa latência)
+  'gemini-1.5-pro-latest',     // Versão Pro (se a Flash falhar)
 ];
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -73,26 +72,27 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
   if (keys.length === 0) return { success: false, message: "Nenhuma chave válida (AIza...) encontrada nas variáveis API_KEY_*." };
 
   for (const apiKey of keys) {
+    // Configuração otimizada para Gemini 2.0/1.5
     const ai = new GoogleGenAI({ apiKey });
     
     for (const modelName of MODEL_CANDIDATES) {
       try {
         const chat = ai.chats.create({ model: modelName, history: [] });
-        await chat.sendMessage({ message: [{ text: "Ping" }] });
+        await chat.sendMessage({ message: "Ping" }); // Simplificado
         
         localStorage.setItem('mara_working_model', modelName);
         
         return { 
           success: true, 
-          message: `Conectado! Modelo: ${modelName}`, 
+          message: `Conectado! Modelo Otimizado: ${modelName}`, 
           keyUsed: apiKey.slice(-4) 
         };
       } catch (e: any) {
-        console.warn(`Modelo ${modelName} falhou...`);
+        // Ignora erros silenciosamente no loop de teste, tenta o próximo
       }
     }
   }
-  return { success: false, message: "Todas as chaves falharam. Verifique se a API está ativa no Google AI Studio." };
+  return { success: false, message: "Todas as chaves falharam. Verifique se a API 'Google Generative AI' está ativa no Google Cloud." };
 };
 
 export const sendMessageToGemini = async (
@@ -105,7 +105,11 @@ export const sendMessageToGemini = async (
   const apiKeys = getAvailableApiKeys();
   if (apiKeys.length === 0) return "⚠️ **Erro de Configuração**: Nenhuma chave de API encontrada (API_KEY_*).";
 
-  const preferredModel = localStorage.getItem('mara_working_model') || MODEL_CANDIDATES[0];
+  // Lógica de Preferência com Fallback Robusto
+  const savedModel = localStorage.getItem('mara_working_model');
+  // Se tiver um modelo salvo, tenta ele primeiro. Se não, começa do topo da lista (Gemini 2.0)
+  // Removemos duplicatas para não tentar o mesmo modelo duas vezes
+  const preferredModel = savedModel && MODEL_CANDIDATES.includes(savedModel) ? savedModel : MODEL_CANDIDATES[0];
   const modelsToTry = [preferredModel, ...MODEL_CANDIDATES.filter(m => m !== preferredModel)];
 
   const chatHistory: Content[] = history
@@ -135,7 +139,12 @@ export const sendMessageToGemini = async (
         try {
             const chat = ai.chats.create({
                 model: model,
-                config: { systemInstruction, tools },
+                config: { 
+                  systemInstruction, 
+                  tools,
+                  // Configurações de Otimização (Thinking Budget desativado para latência baixa em Flash)
+                  thinkingConfig: { thinkingBudget: 0 } 
+                },
                 history: chatHistory
             });
 
@@ -153,23 +162,33 @@ export const sendMessageToGemini = async (
                 responseText = fnResp.text || "";
             }
 
-            if (model !== preferredModel) {
+            // Sucesso! Atualiza o modelo preferido se mudou
+            if (model !== savedModel) {
                 localStorage.setItem('mara_working_model', model);
+                console.log(`[Mara] Modelo atualizado para: ${model}`);
             }
 
             return responseText;
 
         } catch (error: any) {
             const msg = error.message || "";
-            lastError = `${model} erro: ${msg}`;
+            lastError = msg;
             
-            if (msg.includes('429') || msg.includes('Quota')) {
-                await sleep(2000); // Backoff para tentar próxima chave
-                break; // Sai do loop de modelos, tenta próxima chave
+            // Se o modelo salvo falhar (ex: 404), limpa a preferência imediatamente para não tentar de novo
+            if (model === savedModel) {
+               localStorage.removeItem('mara_working_model');
             }
+
+            // Se for erro de cota (429), pausa breve e tenta outra chave/modelo
+            if (msg.includes('429') || msg.includes('Quota')) {
+                await sleep(1000);
+                break; // Sai do loop de modelos desta chave, vai para próxima chave
+            }
+            
+            // Se for 404 (Modelo não encontrado), apenas continua o loop para o próximo modelo
         }
     }
   }
 
-  return `⚠️ **Mara Indisponível**\n\nErro: ${lastError.slice(0, 100)}\n\nNenhuma das ${apiKeys.length} chaves respondeu.`;
+  return `⚠️ **Mara Indisponível**\n\nNão consegui conectar com nenhum modelo (Gemini 2.0/1.5).\nErro final: ${lastError.slice(0, 100)}`;
 };

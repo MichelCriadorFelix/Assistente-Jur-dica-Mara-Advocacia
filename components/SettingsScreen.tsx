@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Key, Activity, CheckCircle } from 'lucide-react';
+import { Database, Key, Activity, CheckCircle, RotateCcw } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys, testConnection } from '../services/geminiService';
 
@@ -30,17 +30,19 @@ const SettingsScreen: React.FC = () => {
   const refreshKeyCount = () => {
     const keys = getAvailableApiKeys();
     setDetectedKeysCount(keys.length);
-    // Para debug visual (mostra final das chaves)
     setDebugKeys(keys.map(k => '...' + k.slice(-4)));
   };
 
   const handleTestConnection = async () => {
     setIsTesting(true);
-    setTestResult('Diagnosticando chaves...');
+    setTestResult('Otimizando conexão...');
+    // Limpa modelo antigo antes de testar para forçar busca do melhor
+    localStorage.removeItem('mara_working_model'); 
+    
     try {
       const result = await testConnection();
       if (result.success) {
-        setTestResult(`✅ SUCESSO! ${result.message} | Chave usada final: ...${result.keyUsed}`);
+        setTestResult(`✅ SUCESSO! ${result.message}`);
         const wm = localStorage.getItem('mara_working_model');
         if (wm) setWorkingModel(wm);
       } else {
@@ -51,6 +53,12 @@ const SettingsScreen: React.FC = () => {
     } finally {
       setIsTesting(false);
     }
+  };
+
+  const handleResetModel = () => {
+    localStorage.removeItem('mara_working_model');
+    setWorkingModel('');
+    alert('Modelo preferido resetado. O sistema buscará o melhor modelo (Gemini 2.0) na próxima mensagem.');
   };
 
   const handleSaveApi = () => {
@@ -102,7 +110,7 @@ const SettingsScreen: React.FC = () => {
                 {detectedKeysCount} Chave(s) Detectada(s) (API_KEY_*)
               </span>
               <button onClick={handleTestConnection} disabled={isTesting} className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 font-bold shadow">
-                {isTesting ? 'Testando...' : 'Testar Conexão'}
+                {isTesting ? 'Otimizando...' : 'Testar & Otimizar'}
               </button>
            </div>
            
@@ -112,7 +120,7 @@ const SettingsScreen: React.FC = () => {
              </div>
            )}
 
-           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
               {debugKeys.map((k, i) => (
                 <div key={i} className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded font-mono text-center">
                   {k}
@@ -121,9 +129,14 @@ const SettingsScreen: React.FC = () => {
            </div>
            
            {workingModel && (
-             <div className="mt-4 text-xs text-emerald-700 bg-emerald-50 p-2 rounded border border-emerald-100 flex items-center gap-2">
-               <Activity className="w-4 h-4" />
-               <span>Modelo Ativo: <strong>{workingModel}</strong></span>
+             <div className="flex items-center justify-between text-xs text-emerald-700 bg-emerald-50 p-2 rounded border border-emerald-100">
+               <div className="flex items-center gap-2">
+                 <Activity className="w-4 h-4" />
+                 <span>Modelo Ativo: <strong>{workingModel}</strong></span>
+               </div>
+               <button onClick={handleResetModel} className="text-emerald-800 underline hover:text-emerald-950" title="Resetar preferência">
+                 <RotateCcw className="w-3 h-3" />
+               </button>
              </div>
            )}
         </div>
