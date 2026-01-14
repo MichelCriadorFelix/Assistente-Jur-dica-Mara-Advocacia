@@ -17,12 +17,17 @@ export interface Contact {
   status: 'new' | 'triaged' | 'urgent';
 }
 
+export interface TeamMember {
+  id: string;
+  name: string;
+  role: string; // ex: Advogado Previdenciário, Secretária
+  phone?: string;
+  active: boolean;
+}
+
 export interface AppConfig {
   systemPrompt: string;
-  lawyers: {
-    name: string;
-    specialty: string;
-  }[];
+  team: TeamMember[];
 }
 
 export enum ViewState {

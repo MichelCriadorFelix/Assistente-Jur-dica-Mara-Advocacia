@@ -30,11 +30,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Mensagem de Boas-vindas Padrão
+           // Mensagem de Boas-vindas "Aberta" (Humanizada)
            const initialMsg: Message = {
              id: 'init-welcome', 
              role: 'model', 
-             content: 'Olá! Sou a Mara, assistente virtual da Felix e Castro Advocacia. ⚖️\n\nPara agilizar seu atendimento, por favor me diga:\n\nCom qual especialista você deseja falar?\n\n1️⃣ *Dr. Michel Felix* (Previdenciário/INSS)\n2️⃣ *Dra. Luana Castro* (Trabalhista)\n3️⃣ *Dra. Flávia Zacarias* (Família)', 
+             content: 'Olá! Sou a Mara, assistente da Felix e Castro Advocacia. ⚖️\n\nEstou aqui para ouvir você. Por favor, me conte brevemente: **O que aconteceu ou qual é a sua dúvida hoje?**\n\n(Pode digitar ou mandar um áudio clicando no microfone 🎙️)', 
              type: 'text', 
              timestamp: new Date()
            };
@@ -66,7 +66,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
     };
 
     // 2. Atualiza UI imediatamente (Optimistic)
-    // IMPORTANTE: Salvamos o estado anterior para passar como histórico para a IA
     const previousHistory = [...messages]; 
     setMessages(prev => [...prev, userMsg]);
     
@@ -90,9 +89,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         });
       }
 
-      // 5. Envia para IA
-      // CORREÇÃO CRÍTICA: Passamos 'previousHistory' (sem a msg atual) para o contexto da IA,
-      // pois a msg atual é enviada como 'newMessage'. Isso evita duplicação e alucinação.
+      // 5. Envia para IA (Filtrando a msg inicial para não confundir o contexto)
       const historyForAI = previousHistory.filter(m => m.id !== 'init-welcome');
 
       const responseText = await sendMessageToGemini(
@@ -212,7 +209,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputText)}
-          placeholder="Digite uma mensagem..."
+          placeholder="Conte o que houve..."
           className="flex-1 rounded-lg border-none px-4 py-3 focus:ring-1 focus:ring-whatsapp-green outline-none bg-white shadow-sm text-gray-700 placeholder-gray-400"
           disabled={isLoading}
         />
