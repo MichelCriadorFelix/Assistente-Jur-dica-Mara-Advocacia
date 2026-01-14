@@ -3,17 +3,30 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // Carrega todas as variáveis de ambiente, ignorando o prefixo padrão
+  // 1. Carrega TODAS as variáveis do sistema/Vercel
   const env = loadEnv(mode, process.cwd(), '');
+
+  // 2. Filtra apenas as que nos interessam (Segurança: não expor chaves da AWS ou banco sem querer)
+  // Aceita: API_KEY, API_KEY_1, API_KEY_50, GOOGLE_API_KEY, GEMINI_KEY, etc.
+  const safeEnv: Record<string, string> = {};
+  
+  Object.keys(env).forEach(key => {
+    if (
+      key.startsWith('API_') || 
+      key.startsWith('GOOGLE_') || 
+      key.startsWith('GEMINI_') ||
+      key.startsWith('VITE_') // Mantém compatibilidade caso sobre alguma antiga
+    ) {
+      safeEnv[key] = env[key];
+    }
+  });
 
   return {
     plugins: [react()],
     define: {
-      // HACK: Força a injeção de variáveis comuns que o usuário pode ter criado sem 'VITE_'
-      // Isso garante que se você criou 'API_KEY' ou 'GOOGLE_API_KEY', o app vai ler.
-      'process.env.API_KEY': JSON.stringify(env.API_KEY),
-      'process.env.GOOGLE_API_KEY': JSON.stringify(env.GOOGLE_API_KEY),
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      // 3. Injeta esse objeto filtrado no código do navegador
+      // Isso faz com que 'process.env.API_KEY_1' funcione magicamente!
+      'process.env': JSON.stringify(safeEnv),
     },
     build: {
       chunkSizeWarningLimit: 1000,

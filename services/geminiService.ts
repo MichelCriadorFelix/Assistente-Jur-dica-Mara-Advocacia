@@ -1,51 +1,53 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// LISTA DE MODELOS ESTENDIDA (AUTO-DESCOBERTA)
-// Adicionamos versões numeradas específicas (-001, -002) pois às vezes os aliases genéricos falham em chaves novas.
+// LISTA DE MODELOS (Auto-Descoberta)
 const MODEL_CANDIDATES = [
   'gemini-1.5-flash',
   'gemini-1.5-flash-001',
   'gemini-1.5-flash-002',
   'gemini-1.5-flash-latest',
   'gemini-1.5-pro',
-  'gemini-1.5-pro-001',
   'gemini-pro',
   'gemini-1.0-pro'
 ];
 
-// Helper: Pausa para evitar bloqueio por spam (429)
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Limpeza Agressiva de Chave
 const cleanKey = (key: string | undefined): string => {
   if (!key) return '';
   return key.replace(/["'\s\n\r]/g, '').trim();
 };
 
 export const getAvailableApiKeys = (): string[] => {
-  // Agora lemos também as variáveis injetadas via 'define' no vite.config.ts
-  // process.env.* agora funcionará para essas chaves específicas
-  const rawKeys = [
-    (import.meta as any).env?.VITE_APP_PARAM_3,
-    (import.meta as any).env?.VITE_ux_config,
-    (import.meta as any).env?.VITE_APP_PARAM_1,
-    (import.meta as any).env?.VITE_APP_PARAM_2,
-    (import.meta as any).env?.VITE_API_KEY,
-    (import.meta as any).env?.VITE_G_CREDENTIAL,
-    // Chaves sem prefixo VITE (Injetadas manualmente)
-    (process.env as any).API_KEY,
-    (process.env as any).GOOGLE_API_KEY,
-    (process.env as any).GEMINI_API_KEY,
-    // Armazenamento local
-    localStorage.getItem('mara_gemini_api_key')
-  ];
+  // Coleta chaves de todas as fontes possíveis
+  const allPossibleValues: string[] = [];
 
-  // Filtra chaves válidas (Começam com 'AIza')
-  const validKeys = rawKeys
+  // 1. Variáveis injetadas pelo Vite (process.env agora contém API_KEY_1, API_KEY_2, etc.)
+  if (typeof process !== 'undefined' && process.env) {
+    Object.values(process.env).forEach(val => {
+      if (typeof val === 'string') allPossibleValues.push(val);
+    });
+  }
+
+  // 2. Fallback para import.meta.env (padrão Vite)
+  if ((import.meta as any).env) {
+     Object.values((import.meta as any).env).forEach((val: any) => {
+       if (typeof val === 'string') allPossibleValues.push(val);
+     });
+  }
+
+  // 3. LocalStorage (Manual)
+  const localKey = localStorage.getItem('mara_gemini_api_key');
+  if (localKey) allPossibleValues.push(localKey);
+
+  // FILTRO INTELIGENTE:
+  // Só aceita strings que parecem chaves do Google (Começam com 'AIza' e são longas)
+  const validKeys = allPossibleValues
     .map(k => cleanKey(k))
     .filter(k => k && k.length > 20 && k.startsWith('AIza'));
 
+  // Remove duplicatas
   return [...new Set(validKeys)];
 };
 
@@ -66,15 +68,13 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
-// --- FUNÇÃO DE TESTE E DESCOBERTA ---
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
   const keys = getAvailableApiKeys();
-  if (keys.length === 0) return { success: false, message: "Nenhuma chave (AIza...) encontrada. Verifique suas variáveis de ambiente." };
+  if (keys.length === 0) return { success: false, message: "Nenhuma chave válida (AIza...) encontrada nas variáveis API_KEY_*." };
 
   for (const apiKey of keys) {
     const ai = new GoogleGenAI({ apiKey });
     
-    // Tenta cada modelo da lista até conectar
     for (const modelName of MODEL_CANDIDATES) {
       try {
         const chat = ai.chats.create({ model: modelName, history: [] });
@@ -84,15 +84,15 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
         
         return { 
           success: true, 
-          message: `Conectado! Modelo aceito: ${modelName}`, 
+          message: `Conectado! Modelo: ${modelName}`, 
           keyUsed: apiKey.slice(-4) 
         };
       } catch (e: any) {
-        console.warn(`Modelo ${modelName} falhou na chave ...${apiKey.slice(-4)}: ${e.message}`);
+        console.warn(`Modelo ${modelName} falhou...`);
       }
     }
   }
-  return { success: false, message: "Todas as tentativas falharam. Verifique se a API 'Google Generative AI' está ativada no console do Google Cloud." };
+  return { success: false, message: "Todas as chaves falharam. Verifique se a API está ativa no Google AI Studio." };
 };
 
 export const sendMessageToGemini = async (
@@ -103,7 +103,7 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   const apiKeys = getAvailableApiKeys();
-  if (apiKeys.length === 0) return "⚠️ **Erro**: Nenhuma chave de API configurada.";
+  if (apiKeys.length === 0) return "⚠️ **Erro de Configuração**: Nenhuma chave de API encontrada (API_KEY_*).";
 
   const preferredModel = localStorage.getItem('mara_working_model') || MODEL_CANDIDATES[0];
   const modelsToTry = [preferredModel, ...MODEL_CANDIDATES.filter(m => m !== preferredModel)];
@@ -162,15 +162,14 @@ export const sendMessageToGemini = async (
         } catch (error: any) {
             const msg = error.message || "";
             lastError = `${model} erro: ${msg}`;
-            console.error(`[Mara] Falha: ${lastError}`);
             
             if (msg.includes('429') || msg.includes('Quota')) {
-                await sleep(2000);
-                break; 
+                await sleep(2000); // Backoff para tentar próxima chave
+                break; // Sai do loop de modelos, tenta próxima chave
             }
         }
     }
   }
 
-  return `⚠️ **Mara Indisponível**\n\nNão consegui conectar.\nÚltimo erro: ${lastError.slice(0, 100)}\n\nDica: Vá em Configurações > Testar Conexão.`;
+  return `⚠️ **Mara Indisponível**\n\nErro: ${lastError.slice(0, 100)}\n\nNenhuma das ${apiKeys.length} chaves respondeu.`;
 };

@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, RefreshCw, Info, Activity } from 'lucide-react';
+import { Database, Key, Activity, CheckCircle } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys, testConnection } from '../services/geminiService';
 
 const SettingsScreen: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [sbKey, setSbKey] = useState('');
-  const [envKeysDetected, setEnvKeysDetected] = useState(0);
+  const [detectedKeysCount, setDetectedKeysCount] = useState(0);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string>('');
   const [workingModel, setWorkingModel] = useState<string>('');
+  const [debugKeys, setDebugKeys] = useState<string[]>([]);
   
   const sbUrlDisplay = 'https://drcxpekguouqsoinaoeb.supabase.co';
 
@@ -23,23 +24,23 @@ const SettingsScreen: React.FC = () => {
     const wm = localStorage.getItem('mara_working_model');
     if (wm) setWorkingModel(wm);
 
-    checkEnvKeys();
+    refreshKeyCount();
   }, []);
 
-  const checkEnvKeys = () => {
+  const refreshKeyCount = () => {
     const keys = getAvailableApiKeys();
-    const local = localStorage.getItem('mara_gemini_api_key');
-    const envOnly = keys.filter(k => k !== local);
-    setEnvKeysDetected(envOnly.length);
+    setDetectedKeysCount(keys.length);
+    // Para debug visual (mostra final das chaves)
+    setDebugKeys(keys.map(k => '...' + k.slice(-4)));
   };
 
   const handleTestConnection = async () => {
     setIsTesting(true);
-    setTestResult('Diagnosticando chaves e modelos...');
+    setTestResult('Diagnosticando chaves...');
     try {
       const result = await testConnection();
       if (result.success) {
-        setTestResult(`✅ SUCESSO! ${result.message} | Chave: ...${result.keyUsed}`);
+        setTestResult(`✅ SUCESSO! ${result.message} | Chave usada final: ...${result.keyUsed}`);
         const wm = localStorage.getItem('mara_working_model');
         if (wm) setWorkingModel(wm);
       } else {
@@ -59,7 +60,7 @@ const SettingsScreen: React.FC = () => {
       localStorage.removeItem('mara_gemini_api_key');
     }
     alert('Configurações salvas!');
-    checkEnvKeys();
+    refreshKeyCount();
   };
 
   const handleSaveSupabase = () => {
@@ -86,28 +87,22 @@ const SettingsScreen: React.FC = () => {
 
   const isSupabaseActive = !!localStorage.getItem('mara_supabase_key');
 
-  // Lista de variáveis para diagnóstico
-  const varsToDiagnose = [
-    { name: "VITE_APP_PARAM_3", val: (import.meta as any).env?.VITE_APP_PARAM_3 },
-    { name: "API_KEY (Sem VITE)", val: (process.env as any).API_KEY },
-    { name: "GOOGLE_API_KEY (Sem VITE)", val: (process.env as any).GOOGLE_API_KEY },
-    { name: "VITE_ux_config", val: (import.meta as any).env?.VITE_ux_config },
-  ];
-
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-10">
       
       {/* SECTION 1: AI SETTINGS */}
       <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border-l-4 border-emerald-500">
         <h2 className="text-xl font-bold dark:text-white flex items-center gap-2 mb-4">
-           <Key className="w-6 h-6 text-emerald-600" /> Chaves de API
+           <Key className="w-6 h-6 text-emerald-600" /> Pool de Chaves de API
         </h2>
         
         <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
            <div className="flex justify-between items-center mb-4">
-              <span className="font-bold text-gray-700 dark:text-gray-300">Diagnóstico de Conexão:</span>
+              <span className="font-bold text-gray-700 dark:text-gray-300">
+                {detectedKeysCount} Chave(s) Detectada(s) (API_KEY_*)
+              </span>
               <button onClick={handleTestConnection} disabled={isTesting} className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 font-bold shadow">
-                {isTesting ? 'Buscando Modelo...' : 'Testar & Descobrir Modelo'}
+                {isTesting ? 'Testando...' : 'Testar Conexão'}
               </button>
            </div>
            
@@ -117,13 +112,10 @@ const SettingsScreen: React.FC = () => {
              </div>
            )}
 
-           <div className="space-y-1 text-xs font-mono text-gray-600 dark:text-gray-400">
-              {varsToDiagnose.map(v => (
-                <div key={v.name} className="flex justify-between border-b border-gray-200 dark:border-gray-700 pb-1">
-                  <span>{v.name}</span>
-                  <span className={v.val ? "text-green-600 font-bold" : "text-red-500"}>
-                    {v.val ? `Encontrada (...${v.val.slice(-4)})` : "Não Encontrada"}
-                  </span>
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {debugKeys.map((k, i) => (
+                <div key={i} className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded font-mono text-center">
+                  {k}
                 </div>
               ))}
            </div>
@@ -131,19 +123,19 @@ const SettingsScreen: React.FC = () => {
            {workingModel && (
              <div className="mt-4 text-xs text-emerald-700 bg-emerald-50 p-2 rounded border border-emerald-100 flex items-center gap-2">
                <Activity className="w-4 h-4" />
-               <span>Modelo Ativo: <strong>{workingModel}</strong> (Auto-Detectado)</span>
+               <span>Modelo Ativo: <strong>{workingModel}</strong></span>
              </div>
            )}
         </div>
         
-        <div className="flex gap-4 items-end">
+        <div className="flex gap-4 items-end opacity-50 hover:opacity-100 transition-opacity">
            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Chave Manual (Alternativa)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Adicionar Chave Extra (Manual)</label>
               <input 
                 type="password" 
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="AIza..."
+                placeholder="Ex: AIzaSy..."
                 className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
               />
            </div>
