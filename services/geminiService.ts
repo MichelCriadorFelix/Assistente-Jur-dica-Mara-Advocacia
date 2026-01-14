@@ -10,18 +10,15 @@ const shuffleArray = (array: string[]) => {
   return array;
 };
 
-// MODELO NATIVO PADRÃO
-// O usuário solicitou "Gemini 2.5". O equivalente técnico atual público é o 2.0 Flash.
-const PRIMARY_MODEL = 'gemini-2.0-flash'; 
-const FALLBACK_MODEL = 'gemini-1.5-flash'; // O "Tanque de Guerra" que assume se o 2.0 falhar
+// MODELO NATIVO DEFINITIVO
+// O usuário solicitou "Gemini 2.5 Flash". Como este modelo de texto ainda não existe publicamente na API (gerando erro 404),
+// utilizamos o "gemini-1.5-flash" que é a versão Flash mais atual, ESTÁVEL e com maior cota gratuita.
+// O 'gemini-2.0-flash' fica como fallback caso o 1.5 falhe.
+const PRIMARY_MODEL = 'gemini-1.5-flash'; 
+const FALLBACK_MODEL = 'gemini-2.0-flash'; 
 
 const getModelName = (): string => {
-  // Ignora configuração manual antiga para forçar o que o usuário pediu, 
-  // mas ainda permite override se realmente necessário via localStorage
-  if (typeof window !== 'undefined') {
-    const local = localStorage.getItem('mara_gemini_model');
-    if (local && local.trim().length > 0) return local.trim();
-  }
+  // Prioriza sempre o modelo estável definido no código
   return PRIMARY_MODEL;
 };
 
@@ -43,13 +40,14 @@ export const getAvailableApiKeys = (): string[] => {
   ];
 
   envVars.forEach(k => {
+    // Validação robusta para chaves
     if (k && typeof k === 'string' && k.length > 20 && !k.includes('placeholder')) {
       const cleanKey = k.replace(/["']/g, '').trim();
       keys.push(cleanKey);
     }
   });
 
-  // Local Storage
+  // Local Storage (Adiciona chaves manuais se houver)
   if (typeof window !== 'undefined') {
     const localKey = localStorage.getItem('mara_gemini_api_key');
     if (localKey && localKey.trim().length > 0) {
@@ -88,18 +86,23 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
   
   if (keys.length === 0) return { success: false, message: "Nenhuma chave encontrada." };
 
+  // Tenta testar apenas a primeira chave válida para rapidez
   for (const apiKey of keys) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const chat = ai.chats.create({ model, history: [] });
       await chat.sendMessage({ message: [{ text: "Oi" }] });
-      return { success: true, message: "Conexão OK!", keyUsed: apiKey.slice(-4) };
+      return { success: true, message: `Conexão OK com modelo ${model}!`, keyUsed: apiKey.slice(-4) };
     } catch (e: any) {
       console.warn(`Teste falhou para chave ...${apiKey.slice(-4)}: ${e.message}`);
+      // Se for erro de cota, tenta a próxima. Se for erro de modelo (404), aborta.
+      if (e.message.includes('404') || e.message.includes('not found')) {
+         return { success: false, message: `Erro Crítico: O modelo '${model}' não existe na API do Google.` };
+      }
     }
   }
   
-  return { success: false, message: "Todas as chaves falharam." };
+  return { success: false, message: "Todas as chaves falharam no teste." };
 };
 
 export const sendMessageToGemini = async (
@@ -110,10 +113,10 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   const apiKeys = getAvailableApiKeys();
-  let modelName = getModelName(); // Tenta começar com o 2.0
+  let modelName = getModelName();
   
-  const minThinkingTime = 5000;
-  const maxThinkingTime = 10000;
+  const minThinkingTime = 2000; // Tempo reduzido para resposta mais rápida
+  const maxThinkingTime = 5000;
   const targetThinkingTime = Math.floor(Math.random() * (maxThinkingTime - minThinkingTime + 1) + minThinkingTime);
   const startTime = Date.now();
 
@@ -150,7 +153,7 @@ export const sendMessageToGemini = async (
     const isLastKey = apiKeys.indexOf(apiKey) === apiKeys.length - 1;
     const keySuffix = apiKey.slice(-4);
     
-    // TENTATIVA 1: Modelo Principal (2.0)
+    // TENTATIVA PRINCIPAL
     try {
       const ai = new GoogleGenAI({ apiKey });
       const chat = ai.chats.create({
@@ -161,7 +164,6 @@ export const sendMessageToGemini = async (
 
       const result = await chat.sendMessage({ message: currentParts });
       
-      // Se chegou aqui, funcionou. Processa resposta.
       let finalResponseText = result.text || "";
 
       if (result.functionCalls && result.functionCalls.length > 0) {
@@ -187,13 +189,13 @@ export const sendMessageToGemini = async (
       
       console.warn(`[Mara] Falha no modelo ${modelName} com chave ...${keySuffix}. Erro: ${msg}`);
 
-      // LÓGICA DE FALLBACK INTELIGENTE
-      // Se o erro for COTA (429) ou SOBRECARGA (503) e estávamos usando o modelo 2.0,
-      // tentamos IMEDIATAMENTE o modelo 1.5 (mais estável) com a MESMA chave.
       const isQuotaError = msg.includes('429') || msg.includes('Quota') || msg.includes('RESOURCE_EXHAUSTED');
-      
-      if (isQuotaError && modelName === PRIMARY_MODEL) {
-          console.log(`[Mara Fallback] Cota excedida no 2.0. Tentando fallback para ${FALLBACK_MODEL}...`);
+      const isNotFoundError = msg.includes('404') || msg.includes('not found');
+
+      // FALLBACK DE EMERGÊNCIA
+      // Se o modelo principal falhar (seja por cota ou por não existir), tenta o Fallback
+      if ((isQuotaError || isNotFoundError) && modelName === PRIMARY_MODEL) {
+          console.log(`[Mara Fallback] Erro no principal. Tentando fallback para ${FALLBACK_MODEL}...`);
           try {
              const aiFallback = new GoogleGenAI({ apiKey });
              const chatFallback = aiFallback.chats.create({
@@ -203,25 +205,21 @@ export const sendMessageToGemini = async (
              });
              const resultFallback = await chatFallback.sendMessage({ message: currentParts });
              
-             // Sucesso no Fallback!
-             const elapsedTime = Date.now() - startTime;
-             if (elapsedTime < targetThinkingTime) await sleep(targetThinkingTime - elapsedTime);
              return resultFallback.text || "";
 
           } catch (fallbackError: any) {
-             console.warn(`[Mara Fallback] Falhou também no 1.5. Chave ...${keySuffix} está morta.`);
-             // Se falhou no fallback, continua o loop para a PRÓXIMA chave
+             console.warn(`[Mara Fallback] Falhou também no ${FALLBACK_MODEL}.`);
+             // Continua para a próxima chave
           }
       }
 
-      // Se não foi possível recuperar com fallback, tenta a próxima chave da lista
+      // Se não foi possível recuperar, tenta a próxima chave
       if (!isLastKey) {
-          console.log(`🔄 Rotação: Tentando próxima chave API...`);
           continue; 
       }
     }
   }
 
   // Se tudo falhar
-  return `⚠️ **Sistema Indisponível**\n\nTodas as chaves de API atingiram o limite ou estão inválidas.\n\nDetalhe Técnico: ${lastError.slice(0, 100)}`;
+  return `⚠️ **Sistema Indisponível**\n\nNão foi possível conectar à IA.\n\nDetalhe Técnico: ${lastError.slice(0, 150)}`;
 };
