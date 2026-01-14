@@ -3,30 +3,35 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // 1. Carrega TODAS as variáveis do sistema/Vercel
+  // Carrega TODAS as variáveis de ambiente disponíveis no sistema
   const env = loadEnv(mode, process.cwd(), '');
 
-  // 2. Filtra apenas as que nos interessam (Segurança: não expor chaves da AWS ou banco sem querer)
-  // Aceita: API_KEY, API_KEY_1, API_KEY_50, GOOGLE_API_KEY, GEMINI_KEY, etc.
-  const safeEnv: Record<string, string> = {};
-  
+  // Objeto que será injetado no código cliente
+  const processEnv: Record<string, string> = {};
+
+  // Copia QUALQUER variável que pareça uma chave importante
+  // Isso resolve o problema da API_KEY_5 não aparecer se não tiver prefixo VITE_
   Object.keys(env).forEach(key => {
+    // Filtro permissivo: Pega tudo que tem KEY, API, GEMINI, GOOGLE ou comece com VITE_
     if (
-      key.startsWith('API_') || 
-      key.startsWith('GOOGLE_') || 
-      key.startsWith('GEMINI_') ||
-      key.startsWith('VITE_') // Mantém compatibilidade caso sobre alguma antiga
+      key.includes('KEY') || 
+      key.includes('API') || 
+      key.includes('GEMINI') || 
+      key.includes('GOOGLE') || 
+      key.startsWith('VITE_') ||
+      key.startsWith('NEXT_PUBLIC_') // Compatibilidade
     ) {
-      safeEnv[key] = env[key];
+      processEnv[key] = env[key];
     }
   });
+
+  console.log("Variáveis injetadas no Build:", Object.keys(processEnv));
 
   return {
     plugins: [react()],
     define: {
-      // 3. Injeta esse objeto filtrado no código do navegador
-      // Isso faz com que 'process.env.API_KEY_1' funcione magicamente!
-      'process.env': JSON.stringify(safeEnv),
+      // Substitui globalmente 'process.env' pelo objeto filtrado
+      'process.env': JSON.stringify(processEnv),
     },
     build: {
       chunkSizeWarningLimit: 1000,

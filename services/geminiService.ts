@@ -1,15 +1,12 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// LISTA DE MODELOS (ORDEM DE PRIORIDADE PARA ESTABILIDADE)
+// LISTA DE MODELOS (ORDEM DE PRIORIDADE)
 const MODEL_CANDIDATES = [
-  'gemini-1.5-flash',          // PRIORIDADE 1: Tier Gratuito Ilimitado (High Rate Limit)
-  'gemini-1.5-flash-latest',   // Fallback
-  'gemini-2.0-flash-exp',      // Experimental (Pode ser instável)
-  'gemini-1.5-pro',            // Backup Pro
+  'gemini-1.5-flash',          
+  'gemini-1.5-flash-latest',   
+  'gemini-2.0-flash-exp',      
 ];
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const cleanKey = (key: string | undefined): string => {
   if (!key) return '';
@@ -25,12 +22,10 @@ const shuffleArray = (array: string[]) => {
   return newArr;
 };
 
-export const getAvailableApiKeys = (): string[] => {
-  const allPossibleValues: string[] = [];
+// Retorna chaves e seus NOMES (para debug)
+export const getAvailableApiKeysMap = (): Record<string, string> => {
+  const keysMap: Record<string, string> = {};
 
-  // SCANNER DE CHAVES AGRESSIVO
-  // Procura em QUALQUER lugar por algo que pareça uma chave AIza
-  
   const envSources = [
     typeof process !== 'undefined' ? process.env : {},
     (import.meta as any).env || {}
@@ -39,28 +34,22 @@ export const getAvailableApiKeys = (): string[] => {
   envSources.forEach(source => {
     if (!source) return;
     Object.entries(source).forEach(([key, val]) => {
-      // Se a chave começar com AIza, pega direto, não importa o nome da variável
-      if (typeof val === 'string' && val.startsWith('AIza') && val.length > 30) {
-        allPossibleValues.push(val);
-      }
-      // Se o nome da variável sugerir uma chave (API_KEY_5, GEMINI_KEY, etc)
-      else if (key.toUpperCase().includes('KEY') || key.toUpperCase().includes('GEMINI')) {
-        if (typeof val === 'string' && val.startsWith('AIza')) {
-           allPossibleValues.push(val);
-        }
+      if (typeof val === 'string' && val.startsWith('AIza') && val.length > 20) {
+        // Salva: "API_KEY_5": "AIza..."
+        keysMap[key] = val;
       }
     });
   });
 
-  // 3. LocalStorage
   const localKey = localStorage.getItem('mara_gemini_api_key');
-  if (localKey) allPossibleValues.push(localKey);
+  if (localKey) keysMap['LOCAL_STORAGE'] = localKey;
 
-  // Retorna chaves únicas e válidas
-  const validKeys = [...new Set(allPossibleValues.map(cleanKey))];
-  
-  console.log(`[Mara] Chaves carregadas: ${validKeys.length}`);
-  return validKeys;
+  return keysMap;
+};
+
+export const getAvailableApiKeys = (): string[] => {
+  const map = getAvailableApiKeysMap();
+  return [...new Set(Object.values(map))].map(cleanKey); // Remove duplicatas de valor
 };
 
 const notifyTeamFunction: FunctionDeclaration = {
@@ -121,16 +110,19 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   let apiKeys = getAvailableApiKeys();
-  if (apiKeys.length === 0) return "⚠️ **Erro**: Nenhuma chave API encontrada.";
+  if (apiKeys.length === 0) return "⚠️ **Erro Crítico**: Nenhuma chave API detectada no sistema. Verifique as configurações.";
 
-  apiKeys = shuffleArray(apiKeys);
+  apiKeys = shuffleArray(apiKeys); // Tenta chaves em ordem aleatória
 
   const savedModel = localStorage.getItem('mara_working_model');
   const preferredModel = savedModel && MODEL_CANDIDATES.includes(savedModel) ? savedModel : MODEL_CANDIDATES[0];
   const modelsToTry = [preferredModel, ...MODEL_CANDIDATES.filter(m => m !== preferredModel)];
 
-  // Formata histórico corretamente para a API
-  const chatHistory: Content[] = history
+  // OTIMIZAÇÃO DE TOKENS: Pega apenas as últimas 8 mensagens
+  // Isso impede que conversas longas estourem a cota da API Gratuita
+  const recentHistory = history.slice(-8);
+
+  const chatHistory: Content[] = recentHistory
     .filter(m => m.role !== 'system' && !m.content.includes('⚠️'))
     .map(m => ({
       role: m.role,
@@ -148,15 +140,13 @@ export const sendMessageToGemini = async (
   }
   if (newMessage.text) currentParts.push({ text: newMessage.text });
 
-  let lastError = "";
+  let errorsLog = [];
 
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
 
     for (const model of modelsToTry) {
         try {
-            console.log(`[Mara] Tentando conectar: ${model} com chave ...${apiKey.slice(-4)}`);
-            
             const chat = ai.chats.create({
                 model: model,
                 config: { 
@@ -172,8 +162,6 @@ export const sendMessageToGemini = async (
 
             if (result.functionCalls && result.functionCalls.length > 0) {
                 const call = result.functionCalls[0];
-                console.log(`[Mara] Tool Call Detectado: ${call.name}`);
-                
                 if (onToolCall) onToolCall({ name: call.name, args: call.args });
                 const fnResp = await chat.sendMessage({
                   message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
@@ -186,15 +174,16 @@ export const sendMessageToGemini = async (
             return responseText;
 
         } catch (error: any) {
-            lastError = error.message || "Erro desconhecido";
-            console.warn(`[Mara] Erro na chave ...${apiKey.slice(-4)} / Modelo ${model}:`, lastError);
-
-            if (lastError.includes('429') || lastError.includes('Quota') || lastError.includes('403')) {
-                break; 
+            const errCode = error.message?.includes('429') ? 'QUOTA_EXCEEDED' : 'ERROR';
+            errorsLog.push(`${model} (${apiKey.slice(-4)}): ${errCode}`);
+            
+            // Se for erro de Cota (429), tenta a próxima chave imediatamente
+            if (error.message?.includes('429') || error.message?.includes('Quota')) {
+                break; // Sai do loop de modelos e vai para próxima chave
             }
         }
     }
   }
 
-  return `⚠️ **Mara Indisponível**\n\nTodas as chaves (${apiKeys.length}) retornaram erro de cota ou falha. Tente novamente em instantes.`;
+  return `⚠️ **Mara Indisponível**\n\nTodas as chaves falharam.\nLogs: ${errorsLog.join('\n')}`;
 };
