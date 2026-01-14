@@ -46,7 +46,7 @@ const notifyTeamFunction: FunctionDeclaration = {
       },
       lawyerName: {
         type: Type.STRING,
-        description: 'Nome do advogado para quem o caso deve ser encaminhado (Dr. Michel, Dra. Luana ou Dra. Flávia)',
+        description: 'Nome do advogado para quem o caso deve ser encaminhado (Dr. Michel Felix, Dra. Luana Castro ou Dra. Flávia Zacarias)',
       },
       priority: {
         type: Type.STRING,

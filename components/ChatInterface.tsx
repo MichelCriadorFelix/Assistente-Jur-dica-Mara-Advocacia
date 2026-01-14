@@ -34,7 +34,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         } else {
            // Initial greeting if new
            const initialMsg: Message = {
-             id: 'init', role: 'model', content: 'Olá! Sou a Mara, assistente virtual da Justiça & Associados. Como posso ajudar você hoje?', type: 'text', timestamp: new Date()
+             id: 'init', 
+             role: 'model', 
+             content: 'Olá! Sou a Mara, assistente virtual da Felix e Castro Advocacia. Como posso ajudar você hoje?', 
+             type: 'text', 
+             timestamp: new Date()
            };
            setMessages([initialMsg]);
         }
