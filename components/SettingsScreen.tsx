@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, RefreshCw, Copy, Info, ExternalLink, Activity } from 'lucide-react';
+import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, RefreshCw, Info, Activity } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys, testConnection } from '../services/geminiService';
 
@@ -9,6 +9,7 @@ const SettingsScreen: React.FC = () => {
   const [envKeysDetected, setEnvKeysDetected] = useState(0);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string>('');
+  const [workingModel, setWorkingModel] = useState<string>('');
   
   const sbUrlDisplay = 'https://drcxpekguouqsoinaoeb.supabase.co';
 
@@ -18,6 +19,9 @@ const SettingsScreen: React.FC = () => {
 
     const sbk = localStorage.getItem('mara_supabase_key');
     if (sbk) setSbKey(sbk);
+    
+    const wm = localStorage.getItem('mara_working_model');
+    if (wm) setWorkingModel(wm);
 
     checkEnvKeys();
   }, []);
@@ -31,16 +35,19 @@ const SettingsScreen: React.FC = () => {
 
   const handleTestConnection = async () => {
     setIsTesting(true);
-    setTestResult('Conectando...');
+    setTestResult('Diagnosticando chaves e modelos...');
     try {
       const result = await testConnection();
       if (result.success) {
-        setTestResult(`✅ Sucesso! Modelo: gemini-1.5-flash | Chave Final: ...${result.keyUsed}`);
+        setTestResult(`✅ SUCESSO! ${result.message} | Chave: ...${result.keyUsed}`);
+        // Atualiza a UI com o modelo descoberto
+        const wm = localStorage.getItem('mara_working_model');
+        if (wm) setWorkingModel(wm);
       } else {
-        setTestResult(`❌ Falha: ${result.message}`);
+        setTestResult(`❌ ERRO: ${result.message}`);
       }
     } catch (e: any) {
-      setTestResult(`Erro: ${e.message}`);
+      setTestResult(`Erro Crítico: ${e.message}`);
     } finally {
       setIsTesting(false);
     }
@@ -72,6 +79,7 @@ const SettingsScreen: React.FC = () => {
   const handleClearLocalData = () => {
     if (confirm("Apagar dados locais?")) {
       chatService.clearLocalData();
+      localStorage.removeItem('mara_working_model');
       alert("Limpo.");
       window.location.reload();
     }
@@ -80,7 +88,7 @@ const SettingsScreen: React.FC = () => {
   const isSupabaseActive = !!localStorage.getItem('mara_supabase_key');
 
   const varsToDiagnose = [
-    { name: "VITE_APP_PARAM_3 (Nova)", val: (import.meta as any).env?.VITE_APP_PARAM_3 },
+    { name: "VITE_APP_PARAM_3", val: (import.meta as any).env?.VITE_APP_PARAM_3 },
     { name: "VITE_ux_config", val: (import.meta as any).env?.VITE_ux_config },
     { name: "VITE_APP_PARAM_1", val: (import.meta as any).env?.VITE_APP_PARAM_1 },
   ];
@@ -96,14 +104,14 @@ const SettingsScreen: React.FC = () => {
         
         <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
            <div className="flex justify-between items-center mb-4">
-              <span className="font-bold text-gray-700 dark:text-gray-300">Diagnóstico de Variáveis:</span>
-              <button onClick={handleTestConnection} disabled={isTesting} className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">
-                {isTesting ? 'Testando...' : 'Testar Conexão Agora'}
+              <span className="font-bold text-gray-700 dark:text-gray-300">Diagnóstico de Conexão:</span>
+              <button onClick={handleTestConnection} disabled={isTesting} className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 font-bold shadow">
+                {isTesting ? 'Buscando Modelo...' : 'Testar & Descobrir Modelo'}
               </button>
            </div>
            
            {testResult && (
-             <div className={`p-2 mb-3 rounded text-sm font-mono ${testResult.includes('Sucesso') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+             <div className={`p-3 mb-3 rounded text-sm font-mono border ${testResult.includes('SUCESSO') ? 'bg-green-100 text-green-900 border-green-200' : 'bg-red-100 text-red-900 border-red-200'}`}>
                {testResult}
              </div>
            )}
@@ -113,20 +121,23 @@ const SettingsScreen: React.FC = () => {
                 <div key={v.name} className="flex justify-between border-b border-gray-200 dark:border-gray-700 pb-1">
                   <span>{v.name}</span>
                   <span className={v.val ? "text-green-600 font-bold" : "text-red-500"}>
-                    {v.val ? `OK (...${v.val.slice(-4)})` : "VAZIO"}
+                    {v.val ? `Encontrada (...${v.val.slice(-4)})` : "Não Encontrada"}
                   </span>
                 </div>
               ))}
            </div>
            
-           <div className="mt-4 text-xs text-blue-600 bg-blue-50 p-2 rounded">
-             <strong>Nota Técnica:</strong> O sistema está forçado a usar o modelo <code>gemini-1.5-flash</code> para garantir estabilidade. O modelo 2.0 (experimental) foi desativado.
-           </div>
+           {workingModel && (
+             <div className="mt-4 text-xs text-emerald-700 bg-emerald-50 p-2 rounded border border-emerald-100 flex items-center gap-2">
+               <Activity className="w-4 h-4" />
+               <span>Modelo Ativo: <strong>{workingModel}</strong> (Auto-Detectado)</span>
+             </div>
+           )}
         </div>
         
         <div className="flex gap-4 items-end">
            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Chave Manual (Opcional)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Chave Manual (Alternativa)</label>
               <input 
                 type="password" 
                 value={apiKey}
