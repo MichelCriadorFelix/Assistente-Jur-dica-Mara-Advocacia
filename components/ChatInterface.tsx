@@ -83,7 +83,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
     setShowMenu(false);
   };
 
-  const handleSendMessage = async (text?: string, audioBlob?: Blob) => {
+  const handleSendMessage = async (text?: string, audioBlob?: Blob, mimeType?: string) => {
     if ((!text && !audioBlob) || !contactId || isLoading) return;
 
     // 1. Cria objeto da mensagem do usuário
@@ -123,6 +123,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           reader.readAsDataURL(audioBlob);
           reader.onloadend = () => {
              const base64 = reader.result as string;
+             // Remove o cabeçalho data:audio/...;base64,
              resolve(base64.split(',')[1]); 
           };
         });
@@ -131,9 +132,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       const historyForAI = previousHistory.filter(m => m.id !== 'init-welcome');
       const caseStatus = freshDetails?.caseStatus || "";
 
+      // Passa explicitamente o mimeType capturado pelo recorder
       const responseText = await sendMessageToGemini(
         historyForAI, 
-        { text, audioBase64 }, 
+        { text, audioBase64, mimeType }, 
         config.systemPrompt,
         async (toolCall) => {
           if (toolCall.name === 'notificar_equipe') {
@@ -159,7 +161,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       const errorMsg: Message = {
         id: Date.now().toString(),
         role: 'model',
-        content: "⚠️ Falha na conexão. Por favor, tente novamente.",
+        content: "⚠️ Falha na conexão ou áudio ilegível. Tente escrever.",
         type: 'text',
         timestamp: new Date()
       };
@@ -189,7 +191,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           <div className="flex flex-col">
             <h1 className="font-semibold text-base leading-tight">Mara (IA Jurídica)</h1>
             <span className="text-xs text-white/90 font-medium">
-              {contactDetails?.aiPaused ? '🔴 Atendimento Humano' : (isLoading ? 'Digitando...' : 'Online')}
+              {contactDetails?.aiPaused ? '🔴 Atendimento Humano' : (isLoading ? 'Ouvindo...' : 'Online')}
             </span>
           </div>
         </div>
@@ -200,7 +202,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
             <MoreVertical className="w-5 h-5 cursor-pointer" />
           </button>
           
-          {/* Dropdown Menu - Agora visível graças ao z-50 do pai */}
+          {/* Dropdown Menu */}
           {showMenu && (
             <div className="absolute right-0 top-12 bg-white rounded-lg shadow-xl py-2 w-56 z-50 animate-in fade-in slide-in-from-top-2 border border-gray-100">
               <button 
@@ -214,7 +216,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         </div>
       </div>
 
-      {/* Área de Mensagens - z-10 mantém abaixo do header */}
+      {/* Área de Mensagens */}
       <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3 pb-20 scroll-smooth">
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
@@ -254,7 +256,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area - z-20 mantém acima das mensagens mas abaixo do header */}
+      {/* Input Area */}
       <div className="absolute bottom-0 w-full bg-[#f0f2f5] p-2 flex items-center gap-2 z-20 border-t border-gray-200">
         <input
           type="text"
@@ -275,11 +277,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
         ) : (
-          <AudioRecorder onAudioRecorded={(blob) => handleSendMessage(undefined, blob)} disabled={isLoading} />
+          <AudioRecorder 
+            onAudioRecorded={(blob, mime) => handleSendMessage(undefined, blob, mime)} 
+            disabled={isLoading} 
+          />
         )}
       </div>
       
-      {/* Overlay para fechar menu ao clicar fora */}
       {showMenu && (
         <div 
           className="absolute inset-0 z-40 bg-transparent"

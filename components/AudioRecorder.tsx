@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import { Mic, Square, Loader2 } from 'lucide-react';
 
 interface AudioRecorderProps {
-  onAudioRecorded: (blob: Blob) => void;
+  onAudioRecorded: (blob: Blob, mimeType: string) => void;
   disabled?: boolean;
 }
 
@@ -10,11 +10,33 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioRecorded, disabled
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const mimeTypeRef = useRef<string>('');
+
+  const getSupportedMimeType = () => {
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4', // Safari
+      'audio/ogg;codecs=opus',
+      'audio/wav'
+    ];
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        return type;
+      }
+    }
+    return ''; // Deixa o navegador decidir o padrão
+  };
 
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      const mimeType = getSupportedMimeType();
+      mimeTypeRef.current = mimeType;
+
+      const options = mimeType ? { mimeType, audioBitsPerSecond: 128000 } : undefined;
+      const mediaRecorder = new MediaRecorder(stream, options);
+      
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -25,8 +47,11 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioRecorded, disabled
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        onAudioRecorded(blob);
+        const type = mimeTypeRef.current || 'audio/webm';
+        const blob = new Blob(chunksRef.current, { type });
+        onAudioRecorded(blob, type);
+        
+        // Limpeza
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -34,7 +59,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioRecorded, disabled
       setIsRecording(true);
     } catch (err) {
       console.error("Error accessing microphone:", err);
-      alert("Erro ao acessar microfone. Verifique as permissões.");
+      alert("Erro ao acessar microfone. Verifique se deu permissão no navegador.");
     }
   }, [onAudioRecorded]);
 
