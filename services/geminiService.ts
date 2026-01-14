@@ -68,12 +68,12 @@ export const getAvailableApiKeys = (): string[] => {
 
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
-  description: 'Notifica o advogado responsável com o relatório completo.',
+  description: 'Notifica o advogado responsável com o relatório completo e estruturado.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       clientName: { type: Type.STRING },
-      summary: { type: Type.STRING },
+      summary: { type: Type.STRING, description: "Resumo detalhado do caso, documentos que possui e histórico." },
       lawyerName: { type: Type.STRING },
       priority: { type: Type.STRING }
     },
@@ -84,17 +84,17 @@ const notifyTeamFunction: FunctionDeclaration = {
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
 // --- CÉREBRO NATIVO (INTELIGÊNCIA DE CONTINGÊNCIA) ---
-// Esta função substitui a IA quando há falhas, mas agora com MEMÓRIA, IDENTIDADE E CAPACIDADE EXPLICATIVA.
+// Atualizado para seguir o fluxo de 6 etapas e entender nuances do INSS
 
 interface ConversationState {
-  area: 'INSS' | 'TRABALHISTA' | 'FAMILIA' | 'UNKNOWN';
-  hasAge: boolean;
-  hasContribution: boolean;
-  hasJobStatus: boolean; 
-  hasChildrenInfo: boolean;
+  area: 'INSS_GERAL' | 'INSS_DOENCA' | 'INSS_BPC' | 'TRABALHISTA' | 'FAMILIA' | 'UNKNOWN';
+  hasName: boolean;
+  hasSummary: boolean;
+  hasDocsInfo: boolean; // Sabe se tem senha/laudos/docs
+  hasSystemAccess: boolean; // Sabe se tem Gov.br ou já tentou antes
   userName: string | null;
   honorific: string; // Sr. ou Sra.
-  isQuestioning: boolean; // O usuário está fazendo uma pergunta?
+  isQuestioning: boolean;
 }
 
 const analyzeHistory = (history: Message[], currentText: string): ConversationState => {
@@ -104,38 +104,39 @@ const analyzeHistory = (history: Message[], currentText: string): ConversationSt
 
   const state: ConversationState = {
     area: 'UNKNOWN',
-    hasAge: false,
-    hasContribution: false,
-    hasJobStatus: false,
-    hasChildrenInfo: false,
+    hasName: false,
+    hasSummary: fullText.length > 50, // Heurística básica
+    hasDocsInfo: false,
+    hasSystemAccess: false,
     userName: null,
     honorific: '',
     isQuestioning: false
   };
 
-  // 1. Detecção de Dúvida/Pergunta do Usuário
+  // 1. Detecção de Dúvida
   if (currentLower.match(/(o que é|como funciona|pra que serve|tenho direito|não entendi|explica|dúvida|que senha|que isso)/)) {
     state.isQuestioning = true;
   }
 
-  // 2. Detecção de Nome (Simples)
+  // 2. Detecção de Nome
   const nameMatch = fullText.match(/(?:sou|chamo|nome é|aqui é|fala o|fala a)\s+([A-Z][a-zà-ú]+)/);
   if (nameMatch) {
     state.userName = nameMatch[1];
+    state.hasName = true;
     if (state.userName.endsWith('a') || state.userName.endsWith('e')) state.honorific = 'Sra.';
     else state.honorific = 'Sr.';
   }
 
-  // 3. Detecção de Área
-  if (lower.match(/(inss|aposenta|benefício|loas|doença|perícia|auxílio|contribuição|idade|encostado|bpc|laudo|senha)/)) state.area = 'INSS';
-  else if (lower.match(/(trabalh|patrão|empresa|demi|verba|fgts|salário|justa causa|botar no pau|acionar|direitos|acerto)/)) state.area = 'TRABALHISTA';
-  else if (lower.match(/(família|divórcio|separação|pensão|guarda|inventário|pai|mãe|marido|esposa|filhos)/)) state.area = 'FAMILIA';
+  // 3. Detecção de Área Refinada
+  if (lower.match(/(doen[çc]a|laudo|médico|encostad|doente|dor|cirurgia|incapaz)/)) state.area = 'INSS_DOENCA';
+  else if (lower.match(/(loas|bpc|idoso sem renda|deficiente)/)) state.area = 'INSS_BPC';
+  else if (lower.match(/(inss|aposenta|tempo|contribui|cnis)/)) state.area = 'INSS_GERAL';
+  else if (lower.match(/(trabalh|patrão|empresa|demi|verba|fgts|botar no pau|acerto)/)) state.area = 'TRABALHISTA';
+  else if (lower.match(/(família|divórcio|separação|pensão|guarda|filhos)/)) state.area = 'FAMILIA';
 
-  // 4. Extração de Dados
-  if (lower.match(/(\d+)\s*(anos|idade)/) || lower.match(/(tenho)\s*(\d+)/)) state.hasAge = true;
-  if (lower.match(/(\d+)\s*(anos|meses)\s*(de)?\s*(contribui|carteira|registro|tempo)/)) state.hasContribution = true;
-  if (lower.match(/(sai|demiti|trabalhando|ainda estou|mandou|justa causa|assinada)/)) state.hasJobStatus = true;
-  if (lower.match(/(filho|criança|menor)/)) state.hasChildrenInfo = true;
+  // 4. Detecção de Documentos/Sistemas
+  if (lower.match(/(senha|gov\.br|meu inss|laudo|carteira|papel|documento|rg|cpf|certidão)/)) state.hasDocsInfo = true;
+  if (lower.match(/(já tentei|negado|advogado antes|nunca|primeira vez|site|sistema)/)) state.hasSystemAccess = true;
 
   return state;
 };
@@ -152,69 +153,69 @@ const runNativeMara = async (
   const state = analyzeHistory(history, lastUserText);
   const treatment = state.userName ? `${state.honorific} ${state.userName}` : "Sr(a).";
 
-  // 0. Prioridade: Responder Dúvidas (EDUCAÇÃO)
-  // Se o usuário fez uma pergunta, EXPLICAMOS antes de seguir o script.
+  // FASE 0: Educação (Responder Dúvidas)
   if (state.isQuestioning) {
-     if (lower.includes('senha') || lower.includes('gov') || lower.includes('inss')) {
-        return `Boa pergunta, ${treatment}. \n\nA senha do 'Meu INSS' (ou Gov.br) é aquele cadastro único do governo. Nós precisamos dela para puxar seu extrato de contribuições (CNIS). Sem ela, o cálculo fica incompleto. \n\nO(A) senhor(a) lembra de ter feito esse cadastro ou tem anotado?`;
+     if (lower.includes('senha') || lower.includes('gov')) {
+        return `Boa pergunta, ${treatment}. A senha do Gov.br é sua identidade digital. Precisamos dela para acessar o sistema do INSS e ver seu histórico (CNIS) ou agendar perícias. O Sr(a). sabe se tem essa senha ativa?`;
      }
-     if (lower.includes('direito') || lower.includes('consigo')) {
-        return `Essa é a dúvida de muita gente, ${treatment}. \n\nPara saber se tem direito exato, precisamos analisar os documentos. Cada caso é único. Mas fique tranquilo(a), nosso escritório é especialista nisso. \n\nPode me contar mais detalhes para eu ajudar?`;
+     if (lower.includes('laudo')) {
+        return `O laudo médico é o documento que o doutor entrega explicando sua doença. Para o INSS, ele precisa ser recente e ter o código da doença (CID). O Sr(a). tem algum papel assim dos seus médicos?`;
      }
-     if (lower.includes('carteira') || lower.includes('sujar')) {
-        return `Não se preocupe com isso, ${treatment}. Buscar seus direitos na justiça não 'suja' sua carteira de trabalho para futuros empregos. Isso é um mito. O importante agora é não perder o prazo.`;
-     }
-     return `Entendi sua dúvida, ${treatment}. É um ponto importante. Vou pedir para o advogado explicar isso detalhadamente para você no atendimento presencial ou ligação, pode ser? \n\nEnquanto isso, me diga apenas mais uma coisa para eu adiantar o caso...`;
+     return `Entendo sua dúvida, ${treatment}. Vou pedir para o advogado te explicar isso em detalhes. Mas antes, para eu deixar tudo pronto: Você tem os documentos básicos do seu caso aí?`;
   }
 
-  // 1. Prioridade: Identidade
-  if (!state.userName && history.length < 4 && !lower.match(/(nome|chamo|sou)/)) {
-     return "Olá! Sou a Mara, assistente da Felix e Castro Advocacia. 👋\n\nAntes de conversarmos, qual é o seu nome, por favor? Assim posso te chamar corretamente.";
+  // FASE 1: Identificação
+  if (!state.hasName && history.length < 3 && !lower.match(/(nome|chamo|sou)/)) {
+     return "Olá! Sou a Mara, assistente jurídica da Felix e Castro Advocacia. ⚖️\n\nPara eu iniciar seu atendimento, qual é o seu nome, por favor?";
   }
 
-  // 2. Prioridade: Prontuário
-  if (caseContext && lower.match(/(como está|andamento|novidades|processo|status)/)) {
-     return `Oi ${treatment}! Consultei aqui o sistema. \n\n${caseContext}\n\nQualquer novidade te avisamos na hora!`;
+  // FASE 2: Entendimento do Caso (Se já temos nome, mas não sabemos a área ou detalhes)
+  if (state.area === 'UNKNOWN' && lastUserText.length < 20) {
+      return `Obrigada, ${treatment}. \n\nPara eu chamar o especialista correto, me conte um pouco sobre o que está acontecendo. É sobre INSS (Aposentadoria/Doença), Problema no Trabalho ou Família?`;
   }
 
-  // 3. LÓGICA DE DECISÃO POR ÁREA
-
-  // --- ROTEIRO INSS ---
-  if (state.area === 'INSS') {
-    if (state.hasAge && state.hasContribution) {
-       if (onToolCall) performHandover(history, lastUserText, "Dr. Michel Felix", onToolCall);
-       return `Entendi tudo, ${treatment}. \n\nCom sua idade e esse tempo de contribuição, temos boas chances de conseguir um benefício melhor. O Dr. Michel é 'expert' nisso. \n\nJá anotei tudo aqui. A Fabrícia vai te chamar para agendar o cálculo, ok?`;
-    }
-    if (!state.hasAge) {
-      return `Certo, ${treatment}. Para aposentadoria, cada mês conta. \n\nQual a sua idade exata hoje?`;
-    }
-    return `Entendi. E sobre o tempo de carteira assinada ou carnê: ${treatment}, o(a) senhor(a) sabe mais ou menos quantos anos somados já pagou ao INSS?`;
+  // FASE 3 e 4: Análise de Direito e Documentos (Específico por Área)
+  
+  // --- INSS DOENÇA/INCAPACIDADE ---
+  if (state.area === 'INSS_DOENCA') {
+      if (!state.hasDocsInfo) {
+          return `Entendi, ${treatment}. Questões de saúde são delicadas. \n\nPara o Dr. Michel analisar se cabe o Auxílio-Doença, precisamos saber: O Sr(a). tem laudos médicos recentes e a senha do 'Meu INSS' (Gov.br)?`;
+      }
+      if (!state.hasSystemAccess) {
+          return `Certo. E me diga: O Sr(a). já chegou a marcar perícia no INSS sozinho ou teve o pedido negado recentemente?`;
+      }
+      // FASE 5: Fechamento
+      if (onToolCall) performHandover(history, lastUserText, "Dr. Michel Felix", onToolCall);
+      return `Perfeito, ${treatment}. Anotei tudo sobre sua saúde e os documentos. \n\nJá estou enviando seu relatório para o Dr. Michel. A Fabrícia vai entrar em contato para agendar a análise dos seus laudos.`;
   }
 
-  // --- ROTEIRO TRABALHISTA ---
+  // --- INSS GERAL (APOSENTADORIA) ---
+  if (state.area === 'INSS_GERAL') {
+      if (!state.hasDocsInfo) {
+          return `Compreendo, ${treatment}. Para calcularmos sua aposentadoria corretamente, o acesso ao CNIS é vital. \n\nO Sr(a). possui a senha do Gov.br (Meu INSS) e a Carteira de Trabalho em mãos?`;
+      }
+      // FASE 5: Fechamento
+      if (onToolCall) performHandover(history, lastUserText, "Dr. Michel Felix", onToolCall);
+      return `Ótimo, ${treatment}. Com a senha e a carteira, o Dr. Michel consegue fazer o Planejamento Previdenciário. Já repassei seu caso e a Fabrícia vai te chamar.`;
+  }
+
+  // --- TRABALHISTA ---
   if (state.area === 'TRABALHISTA') {
-    if (state.hasJobStatus) {
-       if (onToolCall) performHandover(history, lastUserText, "Dra. Luana Castro", onToolCall);
-       return `Compreendo, ${treatment}. \n\nNesses casos trabalhistas, temos prazos para entrar com a ação. Já passei seu relato com urgência para a Dra. Luana Castro. Vamos lutar pelos seus direitos. Aguarde nosso contato.`;
-    }
-    return `Situação chata essa com a empresa, né ${treatment}? Sinto muito. \n\nMas me diga: você ainda está trabalhando lá ou já saiu (foi mandado embora)?`;
+      if (!state.hasDocsInfo) {
+          return `Entendido, ${treatment}. Para a Dra. Luana ver seus direitos: O Sr(a). tem provas do ocorrido (conversas, fotos) ou o contrato de trabalho? Ainda está na empresa ou já saiu?`;
+      }
+      // FASE 5: Fechamento
+      if (onToolCall) performHandover(history, lastUserText, "Dra. Luana Castro", onToolCall);
+      return `Certo, ${treatment}. Situações trabalhistas têm prazo curto. Já notifiquei a Dra. Luana com seu relato. Aguarde nosso contato breve.`;
   }
 
-  // --- ROTEIRO FAMÍLIA ---
-  if (state.area === 'FAMILIA') {
-     if (state.hasChildrenInfo) {
-        if (onToolCall) performHandover(history, lastUserText, "Dra. Flávia Zacarias", onToolCall);
-        return `Pode deixar comigo, ${treatment}. \n\nQuestões de família exigem delicadeza. A Dra. Flávia vai cuidar disso pessoalmente para proteger seus interesses. Nossa equipe vai entrar em contato.`;
-     }
-     return `Entendi, ${treatment}. Para a Dra. Flávia te orientar sobre pensão ou guarda: Tem crianças menores de idade envolvidas?`;
+  // Fallback Genérico se tiver muita informação
+  if (history.length > 6) {
+      if (onToolCall) performHandover(history, lastUserText, "Advogado Responsável", onToolCall);
+      return `Entendi todo o contexto, ${treatment}. \n\nPara não tomarmos mais seu tempo, já compilei as informações e passei para o advogado especialista analisar seu direito. Entraremos em contato em breve!`;
   }
 
-  // --- GENÉRICO INTELIGENTE ---
-  if (lastUserText.length > 30) {
-     return `Li com atenção seu relato, ${treatment}. \n\nPara eu chamar o especialista certo: Isso é mais sobre o seu Trabalho, sobre o INSS/Aposentadoria ou questão de Família?`;
-  }
-
-  return `Entendo, ${treatment}. Estou te ouvindo atentamente. \n\nIsso que você falou é sobre Trabalho, INSS ou Família? Me conte um pouco mais.`;
+  return `Entendi, ${treatment}. Pode me dar mais alguns detalhes sobre isso? Quanto mais você me contar, melhor consigo explicar para o advogado responsável.`;
 };
 
 // Helper para finalizar o atendimento no modo nativo
@@ -224,7 +225,7 @@ const performHandover = (history: Message[], lastText: string, lawyer: string, o
     name: 'notificar_equipe',
     args: {
       clientName: 'Cliente (Via Chat)',
-      summary: fullSummary,
+      summary: `RELATÓRIO NATIVO: ${fullSummary}`,
       lawyerName: lawyer,
       priority: 'Alta'
     }
@@ -280,9 +281,9 @@ export const sendMessageToGemini = async (
      dynamicPrompt += `\n\n### 📂 PRONTUÁRIO/STATUS ATUAL DO CLIENTE (MUITO IMPORTANTE):\nO advogado deixou a seguinte nota sobre o andamento deste caso:\n"${caseContext}"\n\nSE O CLIENTE PERGUNTAR SOBRE ANDAMENTO, DATA DE PERÍCIA OU STATUS, USE ESTA INFORMAÇÃO PARA RESPONDER. SEJA CLARO E TRANQUILIZE O CLIENTE.`;
   }
 
-  // 3. TRUQUE DE ÁUDIO: Se houver áudio, adiciona instrução específica para transcrição
+  // 3. TRUQUE DE ÁUDIO E FONÉTICA: Instrução robusta para erros comuns
   if (newMessage.audioBase64) {
-    dynamicPrompt += `\n\n### 🎤 INSTRUÇÃO DE ÁUDIO CRÍTICA:\nO usuário enviou um áudio. Você DEVE ouvir, transcrever internamente e analisar o conteúdo. Se o áudio for confuso ou contiver gírias (ex: "encostado", "pôs no pau"), interprete o significado jurídico e responda com empatia.`;
+    dynamicPrompt += `\n\n### 🎤 INSTRUÇÃO DE ÁUDIO CRÍTICA:\nO usuário enviou um áudio. Você DEVE ouvir, transcrever internamente e analisar o conteúdo.\n\n⚠️ CORREÇÃO FONÉTICA OBRIGATÓRIA:\nSe ouvir "Mio INSS" -> Entenda "Meu INSS".\nSe ouvir "Qnis" -> Entenda "CNIS".\nSe ouvir "Encostado" -> Entenda "Auxílio-Doença".\nSe ouvir "Loas" -> Entenda "BPC".\n\nNão mencione que corrigiu o termo, apenas responda com o termo jurídico correto.`;
   }
 
   const chatHistory: Content[] = recentHistory
