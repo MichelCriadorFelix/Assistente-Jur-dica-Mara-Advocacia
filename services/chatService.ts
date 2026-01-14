@@ -116,5 +116,29 @@ export const chatService = {
 
     if (error) return [];
     return data ? data.map(mapDbContact) : [];
+  },
+
+  getDashboardStats: async () => {
+    if (!isSupabaseConfigured) {
+      return { total: 0, triaged: 0, urgent: 0, new: 0 };
+    }
+
+    try {
+      const { data, error } = await supabase.from('contacts').select('status');
+      
+      if (error || !data) return { total: 0, triaged: 0, urgent: 0, new: 0 };
+
+      const stats = {
+        total: data.length,
+        triaged: data.filter(c => c.status === 'triaged').length,
+        urgent: data.filter(c => c.status === 'urgent').length,
+        new: data.filter(c => c.status === 'new').length
+      };
+      
+      return stats;
+    } catch (e) {
+      console.error("Error fetching stats", e);
+      return { total: 0, triaged: 0, urgent: 0, new: 0 };
+    }
   }
 };

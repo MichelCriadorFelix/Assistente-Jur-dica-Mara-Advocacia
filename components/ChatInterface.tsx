@@ -145,9 +145,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       {/* Header */}
       <div className="bg-[#00a884] p-3 flex items-center justify-between shadow-md z-10 text-white">
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="md:hidden">
+          {/* Botão Voltar (Visível sempre agora) */}
+          <button 
+            onClick={onBack} 
+            className="p-1 hover:bg-white/20 rounded-full transition-colors"
+            title="Voltar ao Painel"
+          >
             <ArrowLeft className="w-6 h-6" />
           </button>
+          
           <div className="w-10 h-10 rounded-full bg-white overflow-hidden p-1">
              <img src="https://ui-avatars.com/api/?name=Mara+AI&background=0D8ABC&color=fff" alt="Mara" className="w-full h-full rounded-full" />
           </div>
@@ -157,9 +163,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           </div>
         </div>
         <div className="flex gap-4 pr-2">
-          <Video className="w-5 h-5 cursor-pointer" />
-          <Phone className="w-5 h-5 cursor-pointer" />
-          <MoreVertical className="w-5 h-5 cursor-pointer" />
+          <Video className="w-5 h-5 cursor-pointer opacity-80 hover:opacity-100" />
+          <Phone className="w-5 h-5 cursor-pointer opacity-80 hover:opacity-100" />
+          <MoreVertical className="w-5 h-5 cursor-pointer opacity-80 hover:opacity-100" />
         </div>
       </div>
 

@@ -23,11 +23,8 @@ FLUXO:
 5. Avise o cliente que o advogado ou a secretária Fabrícia entrará em contato em breve.
 `;
 
-export const MOCK_CONTACTS: Contact[] = [
-  { id: '1', name: 'João da Silva', lastMessage: 'Obrigado, aguardo o contato.', time: '10:30', avatar: 'https://picsum.photos/id/1012/200/200', unreadCount: 0, status: 'triaged' },
-  { id: '2', name: 'Maria Oliveira', lastMessage: 'Preciso saber sobre minha pensão.', time: '09:15', avatar: 'https://picsum.photos/id/1027/200/200', unreadCount: 2, status: 'new' },
-  { id: '3', name: 'Carlos Pereira', lastMessage: 'Áudio (0:15)', time: 'Ontem', avatar: 'https://picsum.photos/id/1005/200/200', unreadCount: 0, status: 'urgent' },
-];
+// MOCK DATA REMOVIDO PARA GARANTIR FUNCIONALIDADE REAL
+export const MOCK_CONTACTS: Contact[] = [];
 
 export const INITIAL_CONFIG: AppConfig = {
   systemPrompt: INITIAL_SYSTEM_PROMPT,
