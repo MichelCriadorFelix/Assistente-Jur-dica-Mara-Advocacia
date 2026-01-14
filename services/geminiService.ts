@@ -83,90 +83,134 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
-// --- IA NATIVA 4.0 (LÓGICA CONSULTIVA & FLUIDA) ---
-// Essa função roda quando a API do Google falha, garantindo que a Mara não fique "burra".
+// --- CÉREBRO NATIVO (INTELIGÊNCIA DE CONTINGÊNCIA) ---
+// Esta função substitui a IA quando há falhas, mas agora com MEMÓRIA.
+
+interface ConversationState {
+  area: 'INSS' | 'TRABALHISTA' | 'FAMILIA' | 'UNKNOWN';
+  hasAge: boolean;
+  hasContribution: boolean;
+  hasJobStatus: boolean; // Se trabalha ou saiu
+  hasChildrenInfo: boolean;
+  detectedName: string;
+}
+
+const analyzeHistory = (history: Message[], currentText: string): ConversationState => {
+  const fullText = history.filter(m => m.role === 'user').map(m => m.content).join(' ') + ' ' + currentText;
+  const lower = fullText.toLowerCase();
+
+  const state: ConversationState = {
+    area: 'UNKNOWN',
+    hasAge: false,
+    hasContribution: false,
+    hasJobStatus: false,
+    hasChildrenInfo: false,
+    detectedName: 'Cliente'
+  };
+
+  // 1. Detecção de Área
+  if (lower.match(/(inss|aposenta|benefício|loas|doença|perícia|auxílio|contribuição|idade)/)) state.area = 'INSS';
+  else if (lower.match(/(trabalh|patrão|empresa|demi|verba|fgts|salário|justa causa)/)) state.area = 'TRABALHISTA';
+  else if (lower.match(/(família|divórcio|separação|pensão|guarda|inventário|pai|mãe)/)) state.area = 'FAMILIA';
+
+  // 2. Extração de Dados (Regex Inteligente)
+  // Idade: "65 anos", "tenho 65", "minha idade é 65"
+  if (lower.match(/(\d+)\s*(anos|idade)/) || lower.match(/(tenho)\s*(\d+)/)) state.hasAge = true;
+  
+  // Contribuição: "16 anos de contribuição", "contribui 15 anos", "tempo de casa"
+  if (lower.match(/(\d+)\s*(anos|meses)\s*(de)?\s*(contribui|carteira|registro|tempo)/)) state.hasContribution = true;
+
+  // Status Trabalho: "estou trabalhando", "sai da empresa", "fui demitido", "mandaram embora"
+  if (lower.match(/(sai|demiti|trabalhando|ainda estou|mandou|justa causa)/)) state.hasJobStatus = true;
+
+  // Filhos: "tenho filhos", "dois filhos", "criança"
+  if (lower.match(/(filho|criança|menor)/)) state.hasChildrenInfo = true;
+
+  return state;
+};
+
 const runNativeMara = async (
   history: Message[], 
   lastUserText: string,
   onToolCall?: (toolCall: any) => void,
   caseContext?: string
 ): Promise<string> => {
-  console.log("[Mara Native] Modo Consultivo Ativado...");
+  console.log("[Mara Native] Cérebro Lógico Ativado...");
   
   const lower = lastUserText.toLowerCase().trim();
-  const cleanText = lower.replace(/[!?.s]/g, ' ').trim(); 
   
-  // Recupera a última coisa que a MARA disse para manter o contexto
-  const lastBotMsgRaw = [...history].reverse().find(m => m.role === 'model')?.content || "";
-  const lastBotMsg = lastBotMsgRaw.toLowerCase();
-
-  // 1. PRIORIDADE: CONTEXTO DO CASO (PRONTUÁRIO)
-  if (caseContext && lower.match(/(como está|andamento|novidades|processo|perícia|audiência|status|notícias)/)) {
-     return `Oi! Consultei aqui o sistema rapidinho. \n\n${caseContext}\n\nFique tranquilo, qualquer novidade extra te avisamos!`;
+  // 1. Prioridade Absoluta: Respostas diretas ao Prontuário
+  if (caseContext && lower.match(/(como está|andamento|novidades|processo|status)/)) {
+     return `Oi! Consultei aqui o sistema rapidinho. \n\n${caseContext}\n\nFique tranquilo, estamos monitorando!`;
   }
 
-  // 2. DETECÇÃO DE PERGUNTA DO USUÁRIO (EVITA O LOOP "QUE DETALHES?")
-  if (lower.includes('que detalhes') || lower.includes('quais detalhes') || lower.includes('como assim') || lower.includes('o que falar')) {
-    return "Ah, desculpe! 😅 Eu preciso saber um pouco sobre o que aconteceu para chamar o advogado certo.\n\nPor exemplo: é sobre demissão no trabalho? Benefício do INSS negado? Ou pensão alimentícia?";
+  // 2. Analisa o estado atual da conversa (MEMÓRIA)
+  const state = analyzeHistory(history, lastUserText);
+
+  // 3. Verifica se é Saudações/Small Talk (Apenas no início)
+  if (history.length < 2 && /(oi|ola|olá|bom dia|tarde|noite|tudo bem)/.test(lower)) {
+    return "Olá! Tudo bem? Sou a Mara, da Felix e Castro Advocacia. 👋\n\nEstou aqui para te ajudar. Pode me contar o que aconteceu?";
   }
 
-  // 3. SAUDAÇÕES (Respondendo com educação)
-  if (/(oi|ola|olá|bom dia|boa tarde|boa noite|tudo bem|ei|opa)\b/.test(lower) && history.length < 3) {
-    return "Olá! Tudo bem? Sou a Mara, assistente virtual da Felix e Castro. 👋\n\nPode me contar o que houve? Estou aqui para te ouvir.";
-  }
+  // 4. LÓGICA DE DECISÃO BASEADA NO ESTADO (STATE MACHINE)
 
-  // 4. LÓGICA DE CONTEXTO (Respondendo perguntas anteriores)
-  
-  // Se a Mara perguntou idade antes...
-  if (lastBotMsg.includes('idade') || lastBotMsg.includes('anos')) {
-    if (lower.match(/\d+/)) {
-       return "Certo, anotei sua idade. E você sabe me dizer quanto tempo de contribuição (registro) você tem mais ou menos?";
+  // --- ROTEIRO INSS ---
+  if (state.area === 'INSS') {
+    // Se tem idade E contribuição -> Finaliza
+    if (state.hasAge && state.hasContribution) {
+       if (onToolCall) performHandover(history, lastUserText, "Dr. Michel Felix", onToolCall);
+       return "Perfeito. Vi aqui que você já tem a idade e o tempo de contribuição. É um caso excelente para o Dr. Michel analisar. \n\nVocê tem a senha do 'Meu INSS'? Se tiver, já agiliza muito. Vou pedir para a secretária te chamar para agendar.";
+    }
+    // Se tem idade mas falta contribuição
+    if (state.hasAge && !state.hasContribution) {
+      return "Entendi. A idade você já tem. \n\nE sobre o tempo de trabalho: você sabe mais ou menos quantos anos tem de carteira assinada ou carnê?";
+    }
+    // Se falta idade (mas sabemos que é INSS)
+    if (!state.hasAge) {
+      return "Certo, questão previdenciária. \n\nPara o Dr. Michel fazer o cálculo, qual a sua idade exata hoje?";
     }
   }
 
-  // Se a Mara perguntou se trabalha ou saiu...
-  if ((lastBotMsg.includes('trabalhando') || lastBotMsg.includes('saiu')) && (lower.includes('sai') || lower.includes('trabalho') || lower.includes('ainda'))) {
-     return "Entendi. E sua carteira de trabalho foi assinada direitinho ou não registraram?";
+  // --- ROTEIRO TRABALHISTA ---
+  if (state.area === 'TRABALHISTA') {
+    if (state.hasJobStatus) {
+       if (onToolCall) performHandover(history, lastUserText, "Dra. Luana Castro", onToolCall);
+       return "Entendido. Situações trabalhistas têm prazos curtos. \n\nJá registrei seu relato para a Dra. Luana. Como você já informou sua situação na empresa, vamos analisar se cabe um pedido de rescisão indireta ou indenização. Aguarde nosso contato ainda hoje.";
+    }
+    return "Compreendo. Problemas no trabalho são estressantes. \n\nMe diga uma coisa importante: Você ainda está trabalhando na empresa ou já saiu (foi demitido ou pediu conta)?";
   }
 
-  // 5. DETECÇÃO DE ÁREA (INTENT RECOGNITION)
-
-  // --- INSS ---
-  if (lower.match(/(inss|aposenta|benefício|loas|doença|encostado|perícia|auxílio|bpc|deficiente)/)) {
-      return "Entendi, é uma questão previdenciária. O Dr. Michel é especialista nisso. \n\nVocê já deu entrada no pedido e foi negado, ou quer dar entrada agora?";
+  // --- ROTEIRO FAMÍLIA ---
+  if (state.area === 'FAMILIA') {
+     if (state.hasChildrenInfo) {
+        if (onToolCall) performHandover(history, lastUserText, "Dra. Flávia Zacarias", onToolCall);
+        return "Certo. Quando envolve crianças, a prioridade é total. \n\nPassei o caso para a Dra. Flávia. Ela vai analisar a questão da pensão e guarda com todo cuidado. Nossa equipe vai te chamar.";
+     }
+     return "Entendi. Para questões de família, a Dra. Flávia precisa saber: Existem filhos menores de idade envolvidos ou bens (casa, carro) para dividir?";
   }
 
-  // --- TRABALHISTA ---
-  if (lower.match(/(trabalh|empresa|patrão|demi|verba|justa causa|fgts|carteira|salário|acerto|rescisão)/)) {
-      return "Compreendo, parece ser um caso trabalhista para a Dra. Luana. \n\nMe diga uma coisa: você ainda está trabalhando na empresa ou já saiu?";
+  // --- ÁREA DESCONHECIDA (GENÉRICO INTELIGENTE) ---
+  // Se chegou aqui, o usuário falou algo, mas não detectamos a área.
+  // Evita perguntar "que detalhes?" se o usuário já falou muito.
+  if (lastUserText.length > 50) {
+     return "Li seu relato. Parece ser uma situação que precisamos resolver logo. \n\nÉ algo mais voltado para direitos trabalhistas, INSS ou questão familiar? Me confirme para eu chamar o advogado certo.";
   }
 
-  // --- FAMÍLIA ---
-  if (lower.match(/(família|divórcio|separação|pensão|guarda|inventário|herança|ex-marido|ex-mulher|visita)/)) {
-      return "Certo, assuntos de família precisam de atenção especial da Dra. Flávia. \n\nNesse caso, existem filhos menores de idade envolvidos?";
-  }
+  return "Entendo. Estou te ouvindo. \n\nIsso que você mencionou tem a ver com seu Trabalho, com o INSS ou é algo de Família? Me conte um pouquinho mais.";
+};
 
-  // 6. ENCERRAMENTO DE TRIAGEM (HANDOVER)
-  // Se o usuário já falou bastante (heurística simples)
-  if (history.length > 6) {
-      if (onToolCall) {
-        const fullSummary = history.filter(m => m.role === 'user').map(m => m.content).join(" | ");
-        onToolCall({
-          name: 'notificar_equipe',
-          args: {
-            clientName: 'Cliente (Via Chat)',
-            summary: fullSummary,
-            lawyerName: 'A Definir na Triagem',
-            priority: 'Média'
-          }
-        });
-      }
-      return "Obrigada pelas informações! 🙏\n\nJá passei tudo para a nossa equipe. Como seu caso tem detalhes importantes, vou pedir para a secretária analisar a agenda dos advogados e entrar em contato com você ainda hoje.";
-  }
-
-  // 7. FALLBACK INTELIGENTE (QUANDO NÃO ENTENDE)
-  // Em vez de "Não entendi", ela oferece opções.
-  return "Entendi que você precisa de ajuda jurídica. \n\nPara eu chamar o especialista certo, me fale só mais uma coisa: \nIsso é sobre algum problema no **Trabalho**, com o **INSS** ou questão de **Família**?";
+// Helper para finalizar o atendimento no modo nativo
+const performHandover = (history: Message[], lastText: string, lawyer: string, onToolCall: (t: any) => void) => {
+  const fullSummary = history.filter(m => m.role === 'user').map(m => m.content).join(" | ") + " | " + lastText;
+  onToolCall({
+    name: 'notificar_equipe',
+    args: {
+      clientName: 'Cliente (Via Chat)',
+      summary: fullSummary,
+      lawyerName: lawyer,
+      priority: 'Alta'
+    }
+  });
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
