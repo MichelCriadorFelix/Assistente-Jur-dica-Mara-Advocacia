@@ -32,11 +32,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Initial greeting if new - ATUALIZADO PARA POSTURA MAIS PROFISSIONAL
+           // Initial greeting - MENU DE ADVOGADOS
            const initialMsg: Message = {
              id: 'init', 
              role: 'model', 
-             content: 'Olá! Sou a Mara, assistente jurídica da Felix e Castro Advocacia. Estou aqui para analisar seu caso e verificar seus direitos. O assunto seria sobre INSS (Aposentadoria/Auxílio), Trabalhista ou Família?', 
+             content: 'Olá! Sou a Mara, da Felix e Castro Advocacia.\n\nPara iniciarmos, com qual especialista você gostaria de falar?\n\n1️⃣ *Dr. Michel Felix* (INSS / Aposentadoria)\n2️⃣ *Dra. Luana Castro* (Trabalhista)\n3️⃣ *Dra. Flávia Zacarias* (Família / Divórcio)\n\nPor favor, me diga o nome do advogado ou a área do seu caso.', 
              type: 'text', 
              timestamp: new Date()
            };
