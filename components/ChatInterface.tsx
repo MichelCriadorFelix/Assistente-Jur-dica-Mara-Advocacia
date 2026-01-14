@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2 } from 'lucide-react';
 import AudioRecorder from './AudioRecorder';
-import { Message, AppConfig } from '../types';
+import { Message, AppConfig, Contact } from '../types';
 import { sendMessageToGemini } from '../services/geminiService';
 import { chatService } from '../services/chatService';
 
@@ -15,6 +15,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [contactId, setContactId] = useState<string | null>(null);
+  const [contactDetails, setContactDetails] = useState<Contact | null>(null); // Armazena dados incluindo o prontuário
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Inicialização da Sessão
@@ -25,6 +26,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         const id = await chatService.getOrCreateContact(storedId);
         setContactId(id);
         localStorage.setItem('mara_contact_id', id);
+
+        // Carrega detalhes (Prontuário/Status)
+        const details = await chatService.getContactDetails(id);
+        setContactDetails(details);
 
         const history = await chatService.loadMessages(id);
         if (history.length > 0) {
@@ -89,8 +94,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         });
       }
 
-      // 5. Envia para IA (Filtrando a msg inicial para não confundir o contexto)
+      // 5. Envia para IA (Passando o Status do Caso como contexto extra)
       const historyForAI = previousHistory.filter(m => m.id !== 'init-welcome');
+
+      // Tenta recarregar detalhes para garantir que temos o status mais recente
+      const latestDetails = await chatService.getContactDetails(contactId);
+      const caseStatus = latestDetails?.caseStatus || "";
 
       const responseText = await sendMessageToGemini(
         historyForAI, 
@@ -100,7 +109,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           if (toolCall.name === 'notificar_equipe') {
              await chatService.updateContactStatus(contactId, 'triaged', toolCall.args.clientName);
           }
-        }
+        },
+        caseStatus // INJETANDO O PRONTUÁRIO
       );
 
       // 6. Processa resposta da IA

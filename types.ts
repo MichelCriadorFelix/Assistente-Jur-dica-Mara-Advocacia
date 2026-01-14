@@ -15,6 +15,7 @@ export interface Contact {
   avatar: string;
   unreadCount: number;
   status: 'new' | 'triaged' | 'urgent';
+  caseStatus?: string; // NOVO: Informações sobre andamento processual (visível apenas para Adm/IA)
 }
 
 export interface TeamMember {
