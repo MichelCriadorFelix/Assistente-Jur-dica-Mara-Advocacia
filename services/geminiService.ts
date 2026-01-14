@@ -54,7 +54,7 @@ export const getAvailableApiKeys = (): string[] => {
   const uniqueKeys = [...new Set(keys)].filter(k => !!k);
   
   if (uniqueKeys.length > 0) {
-    console.log(`[Mara System] ${uniqueKeys.length} credenciais carregadas com sucesso.`);
+    console.log(`[Mara System] ${uniqueKeys.length} credenciais carregadas e prontas para rotação.`);
   } else {
     console.warn("[Mara System] Nenhuma chave encontrada. Verifique VITE_ux_config na Vercel.");
     // Log para debug no console do navegador
@@ -84,6 +84,9 @@ const notifyTeamFunction: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 
+// Helper para simular delay humano
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const sendMessageToGemini = async (
   history: Message[],
   newMessage: { text?: string; audioBase64?: string; mimeType?: string },
@@ -94,6 +97,13 @@ export const sendMessageToGemini = async (
   const apiKeys = getAvailableApiKeys();
   const modelName = getModelName();
   
+  // Definição do Tempo de Raciocínio (5 a 10 segundos)
+  // Isso define quanto tempo o usuário verá "Mara está digitando..."
+  const minThinkingTime = 5000;
+  const maxThinkingTime = 10000;
+  const targetThinkingTime = Math.floor(Math.random() * (maxThinkingTime - minThinkingTime + 1) + minThinkingTime);
+  const startTime = Date.now();
+
   if (apiKeys.length === 0) {
     return "⚠️ **Erro de Sincronização (Vercel)**\n\nO sistema está rodando, mas não encontrou a chave.\n\nVá em **Configurações > Chaves de API** para ver o diagnóstico detalhado e identificar qual variável está faltando.";
   }
@@ -123,6 +133,8 @@ export const sendMessageToGemini = async (
 
   // Tentar conectar com as chaves disponíveis (Rotação em caso de erro)
   for (const apiKey of apiKeys) {
+    const isLastKey = apiKeys.indexOf(apiKey) === apiKeys.length - 1;
+    
     try {
       const ai = new GoogleGenAI({ apiKey });
       const chat = ai.chats.create({
@@ -132,7 +144,8 @@ export const sendMessageToGemini = async (
       });
 
       const result = await chat.sendMessage({ message: currentParts });
-      
+      let finalResponseText = result.text || "";
+
       // Checa chamadas de função (Tools)
       if (result.functionCalls && result.functionCalls.length > 0) {
         const call = result.functionCalls[0];
@@ -142,23 +155,48 @@ export const sendMessageToGemini = async (
         const finalResult = await chat.sendMessage({
           message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
         });
-        return finalResult.text || "";
+        finalResponseText = finalResult.text || "";
       }
 
-      return result.text || "";
+      // === SIMULAÇÃO DE RACIOCÍNIO HUMANO ===
+      // Se a IA respondeu muito rápido (ex: 1s), esperamos até completar o targetThinkingTime (ex: 5s).
+      const elapsedTime = Date.now() - startTime;
+      if (elapsedTime < targetThinkingTime) {
+        await sleep(targetThinkingTime - elapsedTime);
+      }
+      
+      return finalResponseText;
 
     } catch (error: any) {
       const msg = error.message || '';
-      console.warn(`[API Error] Falha com credencial final ...${apiKey.slice(-4)}:`, msg);
+      console.warn(`[Mara Rotation] Chave ...${apiKey.slice(-4)} falhou. Motivo:`, msg);
+
+      // LÓGICA DE ROTAÇÃO OTIMIZADA
+      // Se o erro for de Cota (429), Sobrecarga (503) ou Permissão (403), 
+      // e NÃO for a última chave, pula imediatamente para a próxima.
+      const isRetryable = msg.includes('429') || 
+                          msg.includes('503') || 
+                          msg.includes('RESOURCE_EXHAUSTED') || 
+                          msg.includes('Overloaded');
+
+      const isAuthError = msg.includes('403') || 
+                          msg.includes('PERMISSION_DENIED') || 
+                          msg.includes('key not valid');
+
+      if ((isRetryable || isAuthError) && !isLastKey) {
+          console.log(`🔄 Rotação Ativada: Trocando da chave ${apiKeys.indexOf(apiKey) + 1} para a próxima...`);
+          continue; // Pula para a próxima iteração do loop (próxima chave)
+      }
 
       // Se for a última chave e falhou todas
-      if (apiKeys.indexOf(apiKey) === apiKeys.length - 1) {
-         if (msg.includes('403') || msg.includes('key not valid') || msg.includes('PERMISSION_DENIED')) {
+      if (isLastKey) {
+         if (isAuthError) {
              return "🚫 **Acesso Negado (Google)**\n\nA chave foi encontrada, mas o Google a rejeitou. Verifique se copiou a chave correta do AI Studio.";
          }
-         if (msg.includes('429')) return "⏳ A IA está sobrecarregada no momento. Tente novamente em alguns segundos.";
+         if (isRetryable) return "⏳ A IA está com alto volume de acessos no momento. Aguarde alguns segundos e tente novamente.";
          return "⚠️ **Erro Técnico:** " + msg;
       }
+      // Se for outro erro desconhecido, tenta a próxima também por segurança
       continue;
     }
   }
