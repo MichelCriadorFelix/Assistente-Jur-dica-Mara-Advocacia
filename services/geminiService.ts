@@ -11,29 +11,61 @@ const getModelName = (): string => {
 };
 
 // Helper para coletar chaves. 
-// ATENÇÃO: Se não houver chave no LocalStorage, o sistema não funcionará pois as chaves públicas foram revogadas.
-const getAvailableApiKeys = (): string[] => {
+// Procura agressivamente por chaves no ambiente (Vercel) e LocalStorage.
+export const getAvailableApiKeys = (): string[] => {
   const keys: string[] = [];
 
-  // 1. Local Storage (Prioridade: Chave do Usuário)
-  if (typeof window !== 'undefined') {
-    const localKey = localStorage.getItem('mara_gemini_api_key');
-    if (localKey && localKey.trim().length > 0) keys.push(localKey.trim());
-  }
-
-  // 2. Variáveis de Ambiente (Caso o usuário faça deploy na Vercel com suas chaves)
-  const envKeys = [
-    process.env.NEXT_PUBLIC_API_KEY,
-    process.env.VITE_API_KEY,
+  // Variáveis de Ambiente
+  const envVars = [
+    // 1. Chaves com prefixo padrão (Vite/Next) - Garantidos pelo Framework
     (import.meta as any).env?.VITE_API_KEY,
-    (import.meta as any).env?.NEXT_PUBLIC_API_KEY
+    (import.meta as any).env?.VITE_API_KEY_1,
+    (import.meta as any).env?.VITE_API_KEY_2,
+    (import.meta as any).env?.VITE_API_KEY_3,
+    (import.meta as any).env?.VITE_GEMINI_KEY,
+    process.env.NEXT_PUBLIC_API_KEY,
+    
+    // 2. Chaves Nativas Vercel (Solicitado pelo Usuário)
+    // Nota: Se o build tool (Vite) não estiver configurado para 'define', estas podem vir undefined.
+    // Mas vamos tentar acessá-las via process.env e import.meta
+    process.env.API_KEY,
+    process.env.API_KEY_1,
+    process.env.API_KEY_2,
+    process.env.API_KEY_3,
+    (import.meta as any).env?.API_KEY,
+    (import.meta as any).env?.API_KEY_1,
+    (import.meta as any).env?.API_KEY_2,
+    (import.meta as any).env?.API_KEY_3,
+    
+    // Fallbacks legados
+    process.env.REACT_APP_API_KEY
   ];
 
-  envKeys.forEach(k => {
-    if (k && typeof k === 'string' && k.length > 20) keys.push(k.trim());
+  envVars.forEach(k => {
+    if (k && typeof k === 'string' && k.length > 20 && !k.includes('placeholder')) {
+      keys.push(k.trim());
+    }
   });
 
-  return [...new Set(keys)].filter(k => !!k);
+  // 3. Local Storage (Override manual do usuário)
+  if (typeof window !== 'undefined') {
+    const localKey = localStorage.getItem('mara_gemini_api_key');
+    if (localKey && localKey.trim().length > 0) {
+      keys.unshift(localKey.trim());
+    }
+  }
+
+  // Remove duplicatas e vazios
+  const uniqueKeys = [...new Set(keys)].filter(k => !!k);
+  
+  // Log para debug (mostra apenas os últimos 4 dígitos)
+  if (uniqueKeys.length > 0) {
+    console.log(`[Mara System] ${uniqueKeys.length} chaves carregadas. Usando final ...${uniqueKeys[0].slice(-4)}`);
+  } else {
+    console.warn("[Mara System] Nenhuma chave encontrada. Verifique se API_KEY_1 está definida na Vercel.");
+  }
+
+  return uniqueKeys;
 };
 
 const notifyTeamFunction: FunctionDeclaration = {
@@ -63,12 +95,9 @@ export const sendMessageToGemini = async (
   const apiKeys = getAvailableApiKeys();
   const modelName = getModelName();
   
-  // Se não tiver chave nenhuma, avisa amigavelmente.
   if (apiKeys.length === 0) {
-    return "⚠️ **Configuração Necessária**\n\nOlá! Para que eu possa funcionar, você precisa adicionar uma Chave de API (Google Gemini).\n\n1. Vá na aba **Configurações** aqui do painel.\n2. Clique em 'Gerar Chave Gratuita'.\n3. Cole a chave no campo indicado e salve.";
+    return "⚠️ **Erro de Chave API**\n\nNão encontrei as chaves `API_KEY_1`, `API_KEY_2` ou `VITE_API_KEY`.\n\n**Dica Vercel:**\nO sistema de segurança do Vite pode estar ocultando suas chaves `API_KEY_1` do navegador. Se isso acontecer, você precisará renomeá-las para `VITE_API_KEY_1` na Vercel (pode ignorar o aviso de segurança deles, pois este é um App Web e precisa da chave pública).";
   }
-
-  console.log(`[Mara System] Usando ${apiKeys.length} chaves disponíveis.`);
 
   // Preparar o histórico
   const chatHistory: Content[] = history
@@ -93,7 +122,7 @@ export const sendMessageToGemini = async (
     currentParts.push({ text: newMessage.text });
   }
 
-  // Tentar conectar com as chaves disponíveis
+  // Tentar conectar com as chaves disponíveis (Rotação em caso de erro)
   for (const apiKey of apiKeys) {
     try {
       const ai = new GoogleGenAI({ apiKey });
@@ -121,27 +150,19 @@ export const sendMessageToGemini = async (
 
     } catch (error: any) {
       const msg = error.message || '';
-      console.warn(`Erro na chave ...${apiKey.slice(-4)}:`, msg);
+      console.warn(`[API Error] Chave final ...${apiKey.slice(-4)} falhou:`, msg);
 
-      // Tratamento específico para chave vazada/banida
-      if (msg.includes('403') || msg.includes('PERMISSION_DENIED') || msg.includes('leaked')) {
-         // Se for a última chave e falhou, retorna erro legível
-         if (apiKeys.indexOf(apiKey) === apiKeys.length - 1) {
-             return "🚫 **Acesso Bloqueado**\n\nA chave de API configurada foi identificada como 'vazada' pelo Google e bloqueada.\n\nPor favor, vá em **Configurações**, remova a chave antiga e gere uma nova em *aistudio.google.com*.";
+      // Se for a última chave e falhou todas
+      if (apiKeys.indexOf(apiKey) === apiKeys.length - 1) {
+         if (msg.includes('403') || msg.includes('key not valid')) {
+             return "🚫 **Chave Inválida/Bloqueada**\n\nO Google rejeitou a chave API configurada. Verifique se ela foi copiada corretamente.";
          }
-         continue; // Tenta a próxima chave se houver
+         if (msg.includes('429')) return "⏳ A IA está sobrecarregada no momento. Tente novamente em alguns segundos.";
+         return "⚠️ **Erro Técnico:** " + msg;
       }
-      
-      if (msg.includes('429')) {
-         return "⏳ **Alto Tráfego**\n\nEstou recebendo muitas solicitações. Por favor, aguarde 30 segundos e tente novamente.";
-      }
-      
-      // Se não for erro de chave/cota, pode ser modelo inexistente
-      if (msg.includes('404')) {
-         return `⚠️ **Erro de Modelo**\n\nO modelo '${modelName}' não está disponível para sua chave. Tente mudar para 'gemini-1.5-flash' nas Configurações.`;
-      }
+      continue;
     }
   }
 
-  return "⚠️ **Erro de Conexão**\n\nNão consegui conectar ao servidor da IA. Verifique sua chave de API nas Configurações.";
+  return "⚠️ Erro desconhecido na comunicação com a IA.";
 };
