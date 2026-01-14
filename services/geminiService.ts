@@ -26,7 +26,7 @@ export const getAvailableApiKeys = (): string[] => {
     // 2. Legado / Outras tentativas
     (import.meta as any).env?.VITE_PUBLIC_DATA_1,
     (import.meta as any).env?.VITE_G_CREDENTIAL,
-    (import.meta as any).env?.VITE_API_KEY, // Vercel costuma bloquear esta
+    (import.meta as any).env?.VITE_API_KEY, 
     
     // 3. Fallbacks
     process.env.NEXT_PUBLIC_API_KEY,
@@ -34,9 +34,11 @@ export const getAvailableApiKeys = (): string[] => {
   ];
 
   envVars.forEach(k => {
-    // Validação básica para garantir que não é uma string vazia ou placeholder
+    // Validação básica e LIMPEZA
     if (k && typeof k === 'string' && k.length > 10 && !k.includes('placeholder')) {
-      keys.push(k.trim());
+      // Remove aspas simples ou duplas que o usuário possa ter colado sem querer e espaços
+      const cleanKey = k.replace(/["']/g, '').trim();
+      keys.push(cleanKey);
     }
   });
 
@@ -55,6 +57,11 @@ export const getAvailableApiKeys = (): string[] => {
     console.log(`[Mara System] ${uniqueKeys.length} credenciais carregadas com sucesso.`);
   } else {
     console.warn("[Mara System] Nenhuma chave encontrada. Verifique VITE_ux_config na Vercel.");
+    // Log para debug no console do navegador
+    console.log("Debug Env Vars:", {
+      VITE_ux_config: (import.meta as any).env?.VITE_ux_config ? 'Presente' : 'Ausente',
+      VITE_APP_PARAM_1: (import.meta as any).env?.VITE_APP_PARAM_1 ? 'Presente' : 'Ausente'
+    });
   }
 
   return uniqueKeys;
@@ -88,7 +95,7 @@ export const sendMessageToGemini = async (
   const modelName = getModelName();
   
   if (apiKeys.length === 0) {
-    return "⚠️ **Erro de Sincronização (Vercel)**\n\nO sistema atualizou, mas ainda não leu suas chaves.\n\n1. Verifique se na Vercel a variável se chama exatamente `VITE_ux_config` ou `VITE_APP_PARAM_1`.\n2. Se você acabou de criar as variáveis, vá na Vercel em **Deployments** e clique em **Redeploy** no último deploy para ele pegar as novas chaves.\n3. Ou insira a chave manualmente em Configurações (ícone de engrenagem) para testar agora.";
+    return "⚠️ **Erro de Sincronização (Vercel)**\n\nO sistema está rodando, mas não encontrou a chave.\n\nVá em **Configurações > Chaves de API** para ver o diagnóstico detalhado e identificar qual variável está faltando.";
   }
 
   // Preparar o histórico
@@ -147,7 +154,7 @@ export const sendMessageToGemini = async (
       // Se for a última chave e falhou todas
       if (apiKeys.indexOf(apiKey) === apiKeys.length - 1) {
          if (msg.includes('403') || msg.includes('key not valid') || msg.includes('PERMISSION_DENIED')) {
-             return "🚫 **Acesso Negado (Google)**\n\nA chave configurada foi rejeitada pelo Google. Verifique se a variável `VITE_ux_config` na Vercel contém a chave correta do AI Studio e se a cobrança está ativa (se necessário).";
+             return "🚫 **Acesso Negado (Google)**\n\nA chave foi encontrada, mas o Google a rejeitou. Verifique se copiou a chave correta do AI Studio.";
          }
          if (msg.includes('429')) return "⏳ A IA está sobrecarregada no momento. Tente novamente em alguns segundos.";
          return "⚠️ **Erro Técnico:** " + msg;

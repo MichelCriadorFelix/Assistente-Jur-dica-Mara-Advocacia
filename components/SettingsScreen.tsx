@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, RefreshCw, Copy } from 'lucide-react';
+import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, RefreshCw, Copy, Info } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys } from '../services/geminiService';
 
@@ -74,10 +74,11 @@ const SettingsScreen: React.FC = () => {
 
   const isSupabaseActive = !!localStorage.getItem('mara_supabase_key');
 
-  const supportedVars = [
-    "VITE_ux_config",
-    "VITE_APP_PARAM_1",
-    "VITE_APP_PARAM_2"
+  // Variáveis para Diagnóstico
+  const varsToDiagnose = [
+    { name: "VITE_ux_config", val: (import.meta as any).env?.VITE_ux_config },
+    { name: "VITE_APP_PARAM_1", val: (import.meta as any).env?.VITE_APP_PARAM_1 },
+    { name: "VITE_APP_PARAM_2", val: (import.meta as any).env?.VITE_APP_PARAM_2 }
   ];
 
   return (
@@ -91,35 +92,29 @@ const SettingsScreen: React.FC = () => {
         </h2>
         
         {/* Environment Status Indicator */}
-        <div className={`mb-6 p-4 rounded-lg border flex items-start gap-3 ${envKeysDetected > 0 ? 'bg-green-50 border-green-200 text-green-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
-           {envKeysDetected > 0 ? (
-             <>
-               <CheckCircle className="w-5 h-5 text-green-600 mt-1" />
-               <div>
-                 <p className="font-bold text-sm">Conectado: {envKeysDetected} credencial(is) detectada(s) do servidor.</p>
-                 <p className="text-xs mt-1">O sistema está lendo suas variáveis da Vercel (ex: VITE_ux_config).</p>
-               </div>
-             </>
-           ) : (
-             <>
-               <AlertTriangle className="w-5 h-5 text-amber-500 mt-1" />
-               <div className="flex-1">
-                 <p className="font-bold text-sm">Nenhuma chave detectada.</p>
-                 <div className="text-xs mt-2 text-gray-600 dark:text-gray-400">
-                   <p className="mb-2"><strong>Correção Vercel:</strong></p>
-                   <p className="mb-2">Verifique se você criou a variável com um destes nomes exatos e depois fez o <strong>Redeploy</strong>:</p>
-                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                      {supportedVars.map(v => (
-                        <div key={v} className="bg-white dark:bg-gray-900 border px-2 py-1.5 rounded flex justify-between items-center text-emerald-700 dark:text-emerald-400">
-                          <code className="text-xs font-mono select-all font-bold">{v}</code>
-                        </div>
-                      ))}
-                   </div>
-                   <p className="text-gray-500 italic">* Se acabou de mudar na Vercel, vá em "Deployments" e clique em "Redeploy".</p>
-                 </div>
-               </div>
-             </>
-           )}
+        <div className={`mb-6 p-4 rounded-lg border flex flex-col gap-3 ${envKeysDetected > 0 ? 'bg-green-50 border-green-200 text-green-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+           <div className="flex items-start gap-3">
+             {envKeysDetected > 0 ? <CheckCircle className="w-5 h-5 text-green-600 mt-1" /> : <AlertTriangle className="w-5 h-5 text-amber-500 mt-1" />}
+             <div>
+               <p className="font-bold text-sm">Status: {envKeysDetected > 0 ? `${envKeysDetected} chave(s) carregada(s) do servidor.` : "Nenhuma chave do servidor encontrada."}</p>
+             </div>
+           </div>
+
+           {/* Painel de Diagnóstico */}
+           <div className="bg-white/80 p-3 rounded text-xs font-mono space-y-1 mt-2 border border-gray-200">
+              <p className="font-bold text-gray-500 mb-2 uppercase tracking-wide">Diagnóstico Vercel:</p>
+              {varsToDiagnose.map(v => (
+                <div key={v.name} className="flex justify-between border-b border-dashed border-gray-300 pb-1">
+                  <span>{v.name}</span>
+                  <span className={v.val ? "text-green-600 font-bold" : "text-red-400"}>
+                    {v.val ? `DETECTADO (Final: ...${v.val.slice(-4)})` : "NÃO DETECTADO"}
+                  </span>
+                </div>
+              ))}
+              <div className="pt-2 text-[10px] text-gray-500 italic">
+                * Se aparecer "DETECTADO" mas não funcionar, verifique se a chave no Google AI Studio está válida.
+              </div>
+           </div>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -131,7 +126,7 @@ const SettingsScreen: React.FC = () => {
               type="password" 
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Só preencha se a Vercel falhar"
+              placeholder="Cole aqui se a Vercel não funcionar"
               className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
             />
           </div>
@@ -152,10 +147,10 @@ const SettingsScreen: React.FC = () => {
 
         <div className="flex justify-end pt-4 gap-2">
             <button onClick={checkEnvKeys} className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-4 py-2 rounded text-sm font-medium transition flex items-center gap-2">
-              <RefreshCw className="w-4 h-4" /> Verificar Novamente
+              <RefreshCw className="w-4 h-4" /> Atualizar Status
             </button>
             <button onClick={handleSaveApi} className="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700 flex items-center gap-2 text-sm font-medium shadow-sm">
-              <Save className="w-4 h-4" /> Salvar
+              <Save className="w-4 h-4" /> Salvar Configuração
             </button>
         </div>
       </div>
