@@ -1,61 +1,48 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Tool, Content, Part } from "@google/genai";
 import { Message } from "../types";
 
-// Chave fornecida pelo usuário para garantir funcionamento imediato
-const DEFAULT_FALLBACK_KEY = "AIzaSyAKn6TpoKlcyuLESez4GMSMeconldxfYNk";
+// Lista de chaves de fallback hardcoded (segurança para demo)
+const FALLBACK_KEYS = [
+  "AIzaSyD-8oeV2Ojwl3a5q9Fe7RkdQ2QROehlljY", // Key 2 (New - Priority)
+  "AIzaSyAKn6TpoKlcyuLESez4GMSMeconldxfYNk"  // Key 1 (Old - Backup)
+];
 
-// Helper to get API Key dynamically at runtime
-const getApiKey = (): string => {
-  // 1. First, check for manual override in Local Storage (set via Settings UI)
+// Helper para coletar TODAS as chaves disponíveis
+const getAvailableApiKeys = (): string[] => {
+  const keys: string[] = [];
+
+  // 1. Local Storage (Definido pelo usuário na UI)
   if (typeof window !== 'undefined') {
     const localKey = localStorage.getItem('mara_gemini_api_key');
-    if (localKey && localKey.trim().length > 0) return localKey;
+    if (localKey && localKey.trim().length > 0) keys.push(localKey);
   }
 
-  // 2. Check Vite specific (Priority for VITE_API_KEY_1 as requested)
+  // 2. Variáveis de Ambiente (Vite/Next)
   if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
     const env = (import.meta as any).env;
-    if (env.VITE_API_KEY_1) return env.VITE_API_KEY_1;
-    if (env.VITE_API_KEY) return env.VITE_API_KEY;
-    if (env.API_KEY_1) return env.API_KEY_1;
+    if (env.VITE_API_KEY_2) keys.push(env.VITE_API_KEY_2);
+    if (env.VITE_API_KEY_1) keys.push(env.VITE_API_KEY_1);
+    if (env.VITE_API_KEY) keys.push(env.VITE_API_KEY);
   }
 
-  // 3. Check Environment Variables (Legacy/Node)
-  if (typeof process !== 'undefined' && process.env) {
-    if (process.env.VITE_API_KEY_1) return process.env.VITE_API_KEY_1;
-    if (process.env.API_KEY_1) return process.env.API_KEY_1;
-    if (process.env.NEXT_PUBLIC_API_KEY_1) return process.env.NEXT_PUBLIC_API_KEY_1;
-    if (process.env.NEXT_PUBLIC_API_KEY) return process.env.NEXT_PUBLIC_API_KEY;
-    if (process.env.API_KEY) return process.env.API_KEY;
-  }
-  
-  // 4. Fallback final para a chave fornecida explicitamente pelo usuário
-  return DEFAULT_FALLBACK_KEY;
+  // 3. Adicionar Fallbacks Hardcoded (garantindo que não duplique se já estiver no env)
+  FALLBACK_KEYS.forEach(k => {
+    if (!keys.includes(k)) keys.push(k);
+  });
+
+  return keys; // Retorna lista de chaves para rotação
 };
 
-// Function Declaration for notifying the team
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
   description: 'Notifica o advogado responsável sobre um novo caso triado.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      clientName: {
-        type: Type.STRING,
-        description: 'Nome do cliente',
-      },
-      summary: {
-        type: Type.STRING,
-        description: 'Resumo do problema jurídico relatado',
-      },
-      lawyerName: {
-        type: Type.STRING,
-        description: 'Nome do advogado para quem o caso deve ser encaminhado (Dr. Michel Felix, Dra. Luana Castro ou Dra. Flávia Zacarias)',
-      },
-      priority: {
-        type: Type.STRING,
-        description: 'Prioridade baseada na urgência do relato (Baixa, Média, Alta)',
-      }
+      clientName: { type: Type.STRING, description: 'Nome do cliente' },
+      summary: { type: Type.STRING, description: 'Resumo do problema jurídico relatado' },
+      lawyerName: { type: Type.STRING, description: 'Nome do advogado responsável' },
+      priority: { type: Type.STRING, description: 'Prioridade (Baixa, Média, Alta)' }
     },
     required: ['clientName', 'summary', 'lawyerName', 'priority'],
   },
@@ -70,17 +57,13 @@ export const sendMessageToGemini = async (
   onToolCall?: (toolCall: any) => void
 ): Promise<string> => {
   
-  // Fetch key at the moment of the call
-  const apiKey = getApiKey();
-
-  if (!apiKey) {
-    console.error("API Key não encontrada.");
-    return "⚠️ Erro de Configuração: Nenhuma chave de API detectada.";
+  const apiKeys = getAvailableApiKeys();
+  
+  if (apiKeys.length === 0) {
+    return "⚠️ Erro Crítico: Nenhuma chave de API configurada no sistema.";
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-
-  // Convert internal Message format to Gemini Content format
+  // Preparar o histórico e a nova mensagem uma única vez
   const chatHistory: Content[] = history
     .filter(m => m.role !== 'system')
     .map(m => ({
@@ -91,7 +74,6 @@ export const sendMessageToGemini = async (
     }));
 
   const currentParts: Part[] = [];
-  
   if (newMessage.audioBase64) {
     currentParts.push({
       inlineData: {
@@ -100,79 +82,83 @@ export const sendMessageToGemini = async (
       }
     });
   }
-  
   if (newMessage.text) {
     currentParts.push({ text: newMessage.text });
   }
 
-  try {
-    // Usando gemini-2.0-flash-exp (a versão mais recente e rápida disponível gratuitamente)
-    // Nota: 'gemini-2.5' ainda não é um endpoint público padrão para texto, usamos o 2.0 Flash que é o equivalente atual.
-    const chat = ai.chats.create({
-      model: 'gemini-2.0-flash-exp', 
-      config: {
-        systemInstruction: systemInstruction,
-        tools: tools,
-      },
-      history: chatHistory
-    });
+  // ROTAÇÃO DE CHAVES (Retry Logic)
+  let lastError: any = null;
 
-    const result = await chat.sendMessage({
-      message: currentParts
-    });
-    
-    const response = result;
-    
-    if (response.functionCalls && response.functionCalls.length > 0) {
-      const call = response.functionCalls[0];
-      
-      if (onToolCall) {
-        onToolCall({ name: call.name, args: call.args });
-      }
+  for (const apiKey of apiKeys) {
+    try {
+      console.log(`Tentando conectar com chave: ...${apiKey.slice(-4)}`);
+      const ai = new GoogleGenAI({ apiKey });
 
-      const functionResponse = {
-        result: "Sucesso. A equipe foi notificada e o CRM atualizado com o lead."
-      };
+      // Tenta primeiro o modelo mais inteligente (2.0 Flash)
+      // Se der erro 404, cai no catch e tenta o 1.5 Flash
+      const modelName = 'gemini-2.0-flash-exp'; 
 
-      const finalResult = await chat.sendMessage({
-        message: [{
-          functionResponse: {
-            name: call.name,
-            response: functionResponse
-          }
-        }]
+      const chat = ai.chats.create({
+        model: modelName,
+        config: { systemInstruction, tools },
+        history: chatHistory
       });
 
-      return finalResult.text || "";
-    }
+      const result = await chat.sendMessage({ message: currentParts });
+      const response = result;
 
-    return response.text || "";
+      // Se funcionou, processa tools e retorna
+      if (response.functionCalls && response.functionCalls.length > 0) {
+        const call = response.functionCalls[0];
+        if (onToolCall) onToolCall({ name: call.name, args: call.args });
 
-  } catch (error: any) {
-    console.error("Gemini API Error:", error);
-    
-    let errorMsg = error.message || JSON.stringify(error);
-    
-    // Fallback para 1.5 Flash se o 2.0 Experimental falhar (ex: instabilidade)
-    if (errorMsg.includes('404') || errorMsg.includes('not found')) {
-        console.warn("Gemini 2.0 Flash not found, trying fallback to 1.5 Flash");
-        try {
-            const fallbackChat = ai.chats.create({
+        const functionResponse = { result: "Sucesso. Equipe notificada." };
+        const finalResult = await chat.sendMessage({
+          message: [{ functionResponse: { name: call.name, response: functionResponse } }]
+        });
+        return finalResult.text || "";
+      }
+
+      return response.text || "";
+
+    } catch (error: any) {
+      lastError = error;
+      const errorMsg = error.message || JSON.stringify(error);
+      console.warn(`Falha com a chave ...${apiKey.slice(-4)}:`, errorMsg);
+
+      // Se for erro de COTA (429) ou Permissão (403), continua o loop para a próxima chave
+      if (errorMsg.includes('429') || errorMsg.includes('403') || errorMsg.includes('Quota')) {
+        continue; 
+      }
+
+      // Se for erro de Modelo não encontrado (404), tenta fallback de modelo na MESMA chave antes de trocar
+      if (errorMsg.includes('404') || errorMsg.includes('not found')) {
+         try {
+            console.log("Tentando fallback para gemini-1.5-flash...");
+            const aiFallback = new GoogleGenAI({ apiKey });
+            const chatFallback = aiFallback.chats.create({
                 model: 'gemini-1.5-flash',
                 config: { systemInstruction, tools },
                 history: chatHistory
             });
-            const fallbackResult = await fallbackChat.sendMessage({ message: currentParts });
-            return fallbackResult.text || "";
-        } catch (fallbackError: any) {
-            return `⚠️ Erro Técnico (Fallback): ${fallbackError.message}`;
-        }
-    }
+            const fbResult = await chatFallback.sendMessage({ message: currentParts });
+            return fbResult.text || "";
+         } catch (fbError) {
+            console.warn("Fallback de modelo também falhou.");
+            continue; // Tenta próxima chave
+         }
+      }
 
-    if (errorMsg.includes('403') || errorMsg.includes('API key')) {
-         return `🔒 Erro de Permissão (403): Chave inválida ou sem acesso.`;
+      // Outros erros técnicos podem ser permanentes, mas vamos tentar rodar as chaves mesmo assim
     }
-
-    return `⚠️ Erro Técnico: ${errorMsg}`;
   }
+
+  // Se saiu do loop, todas as chaves falharam
+  console.error("Todas as chaves de API falharam.");
+  
+  if (lastError?.message?.includes('429')) {
+    return "⚠️ Sistema sobrecarregado (Erro 429). Todas as chaves de API atingiram o limite de uso gratuito. Tente novamente em alguns minutos.";
+  }
+
+  return `⚠️ Erro Técnico: Não foi possível processar sua mensagem após tentar várias conexões. Detalhe: ${lastError?.message || 'Desconhecido'}`;
 };

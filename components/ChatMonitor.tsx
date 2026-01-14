@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Message, Contact, AppConfig } from '../types';
-import { Search, Bot, User, RefreshCw, Key, Save, Database } from 'lucide-react';
+import { Search, Bot, User, RefreshCw, Save, Database } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 
@@ -15,13 +15,8 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   
   const [promptEditable, setPromptEditable] = useState(config.systemPrompt);
-  const [manualApiKey, setManualApiKey] = useState('');
-  
-  // Supabase Manual Config
-  const [manualSupabaseUrl, setManualSupabaseUrl] = useState('');
-  const [manualSupabaseKey, setManualSupabaseKey] = useState('');
+  const [showPromptEdit, setShowPromptEdit] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'settings'>('chat');
   const [loading, setLoading] = useState(false);
 
   // Load Contacts on Mount and Refresh
@@ -36,17 +31,6 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
     fetchContacts();
     // Simple polling every 10 seconds to keep list fresh
     const interval = setInterval(fetchContacts, 10000);
-    
-    // Load existing manual keys
-    const savedKey = localStorage.getItem('mara_gemini_api_key');
-    if (savedKey) setManualApiKey(savedKey);
-    
-    const savedUrl = localStorage.getItem('mara_supabase_url');
-    if (savedUrl) setManualSupabaseUrl(savedUrl);
-    
-    const savedSbKey = localStorage.getItem('mara_supabase_key');
-    if (savedSbKey) setManualSupabaseKey(savedSbKey);
-
     return () => clearInterval(interval);
   }, []);
 
@@ -59,31 +43,8 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
 
   const handleSavePrompt = () => {
     onUpdateConfig({ ...config, systemPrompt: promptEditable });
-    alert('Configurações salvas!');
-  };
-
-  const handleSaveApiKey = () => {
-    if (manualApiKey.trim()) {
-        localStorage.setItem('mara_gemini_api_key', manualApiKey.trim());
-        alert('Chave de IA salva!');
-    } else {
-        localStorage.removeItem('mara_gemini_api_key');
-        alert('Chave removida.');
-    }
-  };
-
-  const handleSaveSupabase = () => {
-    if (manualSupabaseUrl.trim() && manualSupabaseKey.trim()) {
-        localStorage.setItem('mara_supabase_url', manualSupabaseUrl.trim());
-        localStorage.setItem('mara_supabase_key', manualSupabaseKey.trim());
-        alert('Credenciais do Banco salvas! Recarregue a página para conectar.');
-        window.location.reload();
-    } else {
-        localStorage.removeItem('mara_supabase_url');
-        localStorage.removeItem('mara_supabase_key');
-        alert('Credenciais removidas.');
-        window.location.reload();
-    }
+    setShowPromptEdit(false);
+    alert('Persona da IA atualizada!');
   };
 
   return (
@@ -105,19 +66,20 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
-           {!isSupabaseConfigured ? (
+           {contacts.length === 0 ? (
              <div className="p-8 text-center text-gray-500 text-sm flex flex-col items-center">
-                <Database className="w-8 h-8 mb-2 text-yellow-500" />
-                <p>Banco de dados desconectado.</p>
-                <p className="text-xs mt-2">Configure em "Configurações"</p>
+                <p>Nenhum atendimento iniciado.</p>
+                {!isSupabaseConfigured && (
+                   <span className="text-xs text-blue-500 mt-2 bg-blue-50 px-2 py-1 rounded">
+                     Modo Local (Offline) Ativo
+                   </span>
+                )}
              </div>
-           ) : contacts.length === 0 ? (
-             <div className="p-8 text-center text-gray-500 text-sm">Nenhum atendimento iniciado.</div>
            ) : (
              contacts.map(contact => (
                <div 
                  key={contact.id}
-                 onClick={() => { setSelectedContactId(contact.id); setActiveTab('chat'); }}
+                 onClick={() => { setSelectedContactId(contact.id); setShowPromptEdit(false); }}
                  className={`flex items-center gap-3 p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition ${selectedContactId === contact.id ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''}`}
                >
                  <div className="relative">
@@ -140,33 +102,49 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
 
       {/* Main Content Area */}
       <div className="hidden md:flex flex-1 flex-col bg-gray-50 dark:bg-gray-900/50">
-        {selectedContactId || activeTab === 'settings' ? (
+        {selectedContactId || showPromptEdit ? (
           <>
             {/* Header */}
             <div className="h-16 bg-white dark:bg-gray-800 border-b dark:border-gray-700 flex justify-between items-center px-6">
               <div className="flex items-center gap-3">
                  <div className="font-semibold text-lg dark:text-white">
-                   {activeTab === 'chat' ? contacts.find(c => c.id === selectedContactId)?.name : 'Configurações'}
+                   {showPromptEdit ? 'Editar Persona (Instruções)' : contacts.find(c => c.id === selectedContactId)?.name}
                  </div>
-                 {activeTab === 'chat' && isSupabaseConfigured && (
-                    <div className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                      Supabase Online
+                 {!isSupabaseConfigured && (
+                    <div className="px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600">
+                      Armazenamento Local
                     </div>
                  )}
               </div>
               <div className="flex gap-2">
-                 <button onClick={() => setActiveTab('settings')} className={`p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${activeTab === 'settings' ? 'text-emerald-600' : 'text-gray-500'}`}>
-                   Configurações da IA
-                 </button>
-                 <button onClick={() => setActiveTab('chat')} className={`p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${activeTab === 'chat' ? 'text-emerald-600' : 'text-gray-500'}`}>
-                   Chat
+                 <button onClick={() => setShowPromptEdit(!showPromptEdit)} className={`p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${showPromptEdit ? 'text-emerald-600 bg-emerald-50' : 'text-gray-500'}`}>
+                   <Bot className="w-5 h-5" />
                  </button>
               </div>
             </div>
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6">
-               {activeTab === 'chat' ? (
+               {showPromptEdit ? (
+                  <div className="max-w-3xl mx-auto bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
+                      <h3 className="text-lg font-medium mb-4 dark:text-white flex items-center gap-2">
+                        Como a Mara deve se comportar?
+                      </h3>
+                      <textarea 
+                        className="w-full h-96 p-4 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-200 font-mono leading-relaxed resize-none"
+                        value={promptEditable}
+                        onChange={(e) => setPromptEditable(e.target.value)}
+                      />
+                      <div className="mt-4 flex justify-end">
+                        <button 
+                          onClick={handleSavePrompt}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2"
+                        >
+                          <Save className="w-4 h-4" /> Atualizar Persona
+                        </button>
+                      </div>
+                  </div>
+               ) : (
                  messages.length > 0 ? (
                     <div className="space-y-4">
                       {messages.map(msg => (
@@ -188,102 +166,13 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig }) => 
                       <p>Nenhuma mensagem encontrada para este contato.</p>
                     </div>
                  )
-               ) : (
-                 <div className="max-w-2xl mx-auto space-y-8">
-                    
-                    {/* API Key Section */}
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
-                       <h3 className="text-lg font-medium mb-4 dark:text-white flex items-center gap-2">
-                         <Key className="w-5 h-5" /> Chave de API (Gemini)
-                       </h3>
-                       <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded mb-4 text-xs text-yellow-800 dark:text-yellow-200">
-                          Se o app não estiver conseguindo ler a variável da Vercel (API_KEY_1), cole sua chave aqui manualmente.
-                       </div>
-                       <div className="flex gap-2">
-                         <input 
-                           type="password" 
-                           placeholder="Cole sua API Key aqui (AIza...)" 
-                           className="flex-1 p-2 text-sm border rounded outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                           value={manualApiKey}
-                           onChange={(e) => setManualApiKey(e.target.value)}
-                         />
-                         <button 
-                           onClick={handleSaveApiKey}
-                           className="bg-gray-900 text-white px-4 py-2 rounded text-sm hover:bg-black"
-                         >
-                           Salvar
-                         </button>
-                       </div>
-                    </div>
-
-                    {/* Supabase Config Section */}
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
-                       <h3 className="text-lg font-medium mb-4 dark:text-white flex items-center gap-2">
-                         <Database className="w-5 h-5" /> Configuração do Banco (Supabase)
-                       </h3>
-                       <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded mb-4 text-xs text-blue-800 dark:text-blue-200">
-                          Cole abaixo as credenciais do seu projeto Supabase se a conexão automática falhar.
-                       </div>
-                       <div className="space-y-3">
-                         <div>
-                            <label className="text-xs text-gray-500 block mb-1">URL do Projeto</label>
-                            <input 
-                              type="text" 
-                              placeholder="https://xxx.supabase.co" 
-                              className="w-full p-2 text-sm border rounded outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                              value={manualSupabaseUrl}
-                              onChange={(e) => setManualSupabaseUrl(e.target.value)}
-                            />
-                         </div>
-                         <div>
-                            <label className="text-xs text-gray-500 block mb-1">Chave Pública (Anon Key)</label>
-                            <input 
-                              type="password" 
-                              placeholder="eyJxh..." 
-                              className="w-full p-2 text-sm border rounded outline-none dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                              value={manualSupabaseKey}
-                              onChange={(e) => setManualSupabaseKey(e.target.value)}
-                            />
-                         </div>
-                         <div className="flex justify-end">
-                            <button 
-                              onClick={handleSaveSupabase}
-                              className="bg-gray-900 text-white px-4 py-2 rounded text-sm hover:bg-black"
-                            >
-                              Salvar e Conectar
-                            </button>
-                         </div>
-                       </div>
-                    </div>
-
-                    {/* Persona Section */}
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm border dark:border-gray-700">
-                      <h3 className="text-lg font-medium mb-4 dark:text-white flex items-center gap-2">
-                        <Bot className="w-5 h-5" /> Instruções do Sistema (Persona)
-                      </h3>
-                      <p className="text-sm text-gray-500 mb-2">Edite como a Mara se comporta em tempo real.</p>
-                      <textarea 
-                        className="w-full h-64 p-3 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-200 font-mono"
-                        value={promptEditable}
-                        onChange={(e) => setPromptEditable(e.target.value)}
-                      />
-                      <div className="mt-4 flex justify-end">
-                        <button 
-                          onClick={handleSavePrompt}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2"
-                        >
-                          <Save className="w-4 h-4" /> Salvar Prompt
-                        </button>
-                      </div>
-                    </div>
-
-                 </div>
                )}
             </div>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-            <p>Selecione um contato ou vá em Configurações</p>
+            <Bot className="w-16 h-16 mb-4 opacity-10" />
+            <p>Selecione um contato para monitorar</p>
           </div>
         )}
       </div>

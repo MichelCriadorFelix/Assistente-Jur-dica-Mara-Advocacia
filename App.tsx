@@ -4,6 +4,7 @@ import ChatInterface from './components/ChatInterface';
 import DashboardLayout from './components/DashboardLayout';
 import DashboardStats from './components/DashboardStats';
 import ChatMonitor from './components/ChatMonitor';
+import SettingsScreen from './components/SettingsScreen';
 import { ViewState, AppConfig } from './types';
 import { INITIAL_CONFIG } from './constants';
 import { Smartphone } from 'lucide-react';
@@ -44,10 +45,7 @@ function App() {
               />
             )}
             {dashboardPage === 'settings' && (
-              <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow text-center">
-                 <h2 className="text-xl dark:text-white">Configurações Gerais</h2>
-                 <p className="text-gray-500 mt-2">Use a aba "Monitor de Chat" para editar a persona da IA.</p>
-              </div>
+              <SettingsScreen />
             )}
             
             {/* Floating Action Button to launch Client Demo */}

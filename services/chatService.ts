@@ -1,7 +1,28 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { Message, Contact } from '../types';
 
-// Map DB row to Frontend Message Type
+// === SISTEMA DE BANCO DE DADOS LOCAL (FALLBACK) ===
+const LOCAL_STORAGE_KEY = 'mara_local_db';
+
+interface LocalDB {
+  contacts: Contact[];
+  messages: Record<string, Message[]>; // contactId -> messages[]
+}
+
+const getLocalDB = (): LocalDB => {
+  if (typeof window === 'undefined') return { contacts: [], messages: {} };
+  const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+  return data ? JSON.parse(data) : { contacts: [], messages: {} };
+};
+
+const saveLocalDB = (db: LocalDB) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(db));
+  }
+};
+
+// ===================================================
+
 const mapDbMessage = (row: any): Message => ({
   id: row.id,
   role: row.role as 'user' | 'model',
@@ -11,7 +32,6 @@ const mapDbMessage = (row: any): Message => ({
   audioUrl: row.audio_url
 });
 
-// Map DB row to Contact Type
 const mapDbContact = (row: any): Contact => ({
   id: row.id,
   name: row.name,
@@ -22,25 +42,41 @@ const mapDbContact = (row: any): Contact => ({
   status: row.status as any
 });
 
-// Helper for Demo Mode
-const generateTempId = () => 'temp-id-' + Date.now();
-
 export const chatService = {
-  // Ensure a contact exists for the current user (Client View)
+  
   getOrCreateContact: async (contactId: string | null): Promise<string> => {
-    // Demo Mode Check
+    // 1. MODO LOCAL (Se Supabase estiver OFF ou falhar)
     if (!isSupabaseConfigured) {
-      console.log("Supabase off: Usando ID temporário.");
-      return contactId && contactId.startsWith('temp-id') ? contactId : generateTempId();
+      const db = getLocalDB();
+      
+      // Se já existe um ID local válido
+      if (contactId && db.contacts.find(c => c.id === contactId)) {
+        return contactId;
+      }
+
+      // Cria novo contato local
+      const newContact: Contact = {
+        id: 'local-' + Date.now(),
+        name: 'Novo Cliente (Local)',
+        lastMessage: 'Iniciou conversa',
+        time: new Date().toLocaleTimeString(),
+        avatar: `https://ui-avatars.com/api/?name=Cliente+${Math.floor(Math.random() * 100)}&background=random`,
+        unreadCount: 0,
+        status: 'new'
+      };
+      
+      db.contacts.unshift(newContact);
+      db.messages[newContact.id] = [];
+      saveLocalDB(db);
+      return newContact.id;
     }
 
-    if (contactId && !contactId.startsWith('temp-id')) {
-       // Verify it exists
+    // 2. MODO SUPABASE
+    if (contactId && !contactId.startsWith('local-')) {
        const { data } = await supabase.from('contacts').select('id').eq('id', contactId).single();
        if (data) return data.id;
     }
 
-    // Create new
     try {
       const { data, error } = await supabase.from('contacts').insert([{
          name: 'Novo Cliente',
@@ -48,37 +84,66 @@ export const chatService = {
          avatar: `https://ui-avatars.com/api/?name=User+${Math.floor(Math.random() * 100)}&background=random`
       }]).select().single();
 
-      if (error) {
-          console.error("Error creating contact:", error);
-          return generateTempId();
-      }
+      if (error) throw error;
       return data.id;
     } catch (err) {
-      console.error("Critical error connecting to DB:", err);
-      return generateTempId();
+      console.warn("Supabase falhou, usando modo local.");
+      return chatService.getOrCreateContact('force-local'); // Recursiva para cair no modo local
     }
   },
 
   loadMessages: async (contactId: string): Promise<Message[]> => {
-    if (!isSupabaseConfigured || contactId.startsWith('temp-id')) return [];
+    // MODO LOCAL
+    if (!isSupabaseConfigured || contactId.startsWith('local-')) {
+      const db = getLocalDB();
+      const msgs = db.messages[contactId] || [];
+      // Re-hidratar datas (strings -> Date objects)
+      return msgs.map(m => ({ ...m, timestamp: new Date(m.timestamp) }));
+    }
 
+    // MODO SUPABASE
     const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('contact_id', contactId)
       .order('created_at', { ascending: true });
     
-    if (error) {
-        console.error("Error loading messages", error);
-        return [];
-    }
+    if (error) return [];
     return data ? data.map(mapDbMessage) : [];
   },
 
   saveMessage: async (contactId: string, message: Partial<Message>) => {
-    if (!isSupabaseConfigured || contactId.startsWith('temp-id')) return;
+    // MODO LOCAL
+    if (!isSupabaseConfigured || contactId.startsWith('local-')) {
+       const db = getLocalDB();
+       
+       const newMessage: Message = {
+         id: message.id || Date.now().toString(),
+         role: message.role!,
+         content: message.content || '',
+         type: message.type || 'text',
+         timestamp: new Date(),
+         audioUrl: message.audioUrl
+       };
 
-    // 1. Insert Message
+       if (!db.messages[contactId]) db.messages[contactId] = [];
+       db.messages[contactId].push(newMessage);
+
+       // Atualiza contato
+       const contactIndex = db.contacts.findIndex(c => c.id === contactId);
+       if (contactIndex >= 0) {
+         db.contacts[contactIndex].lastMessage = message.type === 'audio' ? '🎵 Áudio' : (message.content || '');
+         db.contacts[contactIndex].time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+         // Move to top
+         const contact = db.contacts.splice(contactIndex, 1)[0];
+         db.contacts.unshift(contact);
+       }
+
+       saveLocalDB(db);
+       return;
+    }
+
+    // MODO SUPABASE
     const { error: msgError } = await supabase.from('messages').insert([{
       contact_id: contactId,
       role: message.role,
@@ -87,58 +152,93 @@ export const chatService = {
       audio_url: message.audioUrl
     }]);
 
-    if (msgError) console.error("Error saving message", msgError);
-
-    // 2. Update Contact Metadata (Last Message)
-    await supabase.from('contacts').update({
-      last_message: message.type === 'audio' ? '🎵 Áudio' : message.content,
-      updated_at: new Date().toISOString(),
-      unread_count: 0 
-    }).eq('id', contactId);
+    if (!msgError) {
+        await supabase.from('contacts').update({
+          last_message: message.type === 'audio' ? '🎵 Áudio' : message.content,
+          updated_at: new Date().toISOString(),
+          unread_count: 0 
+        }).eq('id', contactId);
+    }
   },
 
   updateContactStatus: async (contactId: string, status: string, name?: string) => {
-     if (!isSupabaseConfigured || contactId.startsWith('temp-id')) return;
+     // MODO LOCAL
+     if (!isSupabaseConfigured || contactId.startsWith('local-')) {
+        const db = getLocalDB();
+        const contact = db.contacts.find(c => c.id === contactId);
+        if (contact) {
+          contact.status = status as any;
+          if (name) contact.name = name;
+          saveLocalDB(db);
+        }
+        return;
+     }
 
+     // MODO SUPABASE
      const updateData: any = { status };
      if (name) updateData.name = name;
-     
      await supabase.from('contacts').update(updateData).eq('id', contactId);
   },
 
   getAllContacts: async (): Promise<Contact[]> => {
-    if (!isSupabaseConfigured) return [];
+    // MODO LOCAL
+    if (!isSupabaseConfigured) {
+      return getLocalDB().contacts;
+    }
 
+    // MODO SUPABASE
     const { data, error } = await supabase
       .from('contacts')
       .select('*')
       .order('updated_at', { ascending: false });
 
-    if (error) return [];
+    if (error) {
+      // Fallback para local se a query falhar
+      return getLocalDB().contacts;
+    }
     return data ? data.map(mapDbContact) : [];
   },
 
   getDashboardStats: async () => {
+    // MODO LOCAL
     if (!isSupabaseConfigured) {
-      return { total: 0, triaged: 0, urgent: 0, new: 0 };
+      const contacts = getLocalDB().contacts;
+      return {
+        total: contacts.length,
+        triaged: contacts.filter(c => c.status === 'triaged').length,
+        urgent: contacts.filter(c => c.status === 'urgent').length,
+        new: contacts.filter(c => c.status === 'new').length
+      };
     }
 
+    // MODO SUPABASE
     try {
       const { data, error } = await supabase.from('contacts').select('status');
-      
-      if (error || !data) return { total: 0, triaged: 0, urgent: 0, new: 0 };
+      if (error || !data) throw error;
 
-      const stats = {
+      return {
         total: data.length,
         triaged: data.filter(c => c.status === 'triaged').length,
         urgent: data.filter(c => c.status === 'urgent').length,
         new: data.filter(c => c.status === 'new').length
       };
-      
-      return stats;
     } catch (e) {
-      console.error("Error fetching stats", e);
-      return { total: 0, triaged: 0, urgent: 0, new: 0 };
+      // Fallback silencioso para local
+      const contacts = getLocalDB().contacts;
+      return {
+        total: contacts.length,
+        triaged: contacts.filter(c => c.status === 'triaged').length,
+        urgent: contacts.filter(c => c.status === 'urgent').length,
+        new: contacts.filter(c => c.status === 'new').length
+      };
+    }
+  },
+  
+  // Função extra para resetar dados locais (Útil para testes)
+  clearLocalData: () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(LOCAL_STORAGE_KEY);
+      localStorage.removeItem('mara_contact_id');
     }
   }
 };
