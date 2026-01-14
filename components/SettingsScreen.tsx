@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, RefreshCw, Copy, Info, ExternalLink } from 'lucide-react';
+import { Save, Database, Key, Trash2, CheckCircle, AlertTriangle, Cpu, RefreshCw, Copy, Info, ExternalLink, Activity } from 'lucide-react';
 import { chatService } from '../services/chatService';
-import { getAvailableApiKeys } from '../services/geminiService';
+import { getAvailableApiKeys, testConnection } from '../services/geminiService';
 
 const SettingsScreen: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [sbKey, setSbKey] = useState('');
   const [modelName, setModelName] = useState('gemini-2.0-flash');
   const [envKeysDetected, setEnvKeysDetected] = useState(0);
+  const [isTesting, setIsTesting] = useState(false);
   
   const sbUrlDisplay = 'https://drcxpekguouqsoinaoeb.supabase.co';
 
@@ -32,6 +33,22 @@ const SettingsScreen: React.FC = () => {
     const local = localStorage.getItem('mara_gemini_api_key');
     const envOnly = keys.filter(k => k !== local);
     setEnvKeysDetected(envOnly.length);
+  };
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    try {
+      const result = await testConnection();
+      if (result.success) {
+        alert(`✅ Sucesso! Conectado usando a chave final ...${result.keyUsed}`);
+      } else {
+        alert(`❌ Falha: ${result.message}\n\nVerifique se as chaves têm saldo ou se o modelo '${modelName}' está correto.`);
+      }
+    } catch (e) {
+      alert("Erro ao executar teste.");
+    } finally {
+      setIsTesting(false);
+    }
   };
 
   const handleSaveApi = () => {
@@ -86,19 +103,29 @@ const SettingsScreen: React.FC = () => {
       
       {/* SECTION 1: AI SETTINGS */}
       <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border-l-4 border-emerald-500">
-        <div className="flex justify-between items-start mb-4">
+        <div className="flex flex-col md:flex-row justify-between items-start mb-4 gap-4">
             <h2 className="text-xl font-bold dark:text-white flex items-center gap-2">
             <Key className="w-6 h-6 text-emerald-600" /> 
             Chaves de API (Vercel & Manual)
             </h2>
-            <a 
-              href="https://aistudio.google.com/app/apikey" 
-              target="_blank" 
-              rel="noreferrer"
-              className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1 transition"
-            >
-              Gerenciar Chaves Google <ExternalLink className="w-3 h-3"/>
-            </a>
+            <div className="flex gap-2">
+              <button 
+                onClick={handleTestConnection}
+                disabled={isTesting}
+                className={`text-xs px-3 py-1 rounded-full border flex items-center gap-1 transition font-bold ${isTesting ? 'bg-gray-100 text-gray-400' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}
+              >
+                {isTesting ? <RefreshCw className="w-3 h-3 animate-spin"/> : <Activity className="w-3 h-3"/>}
+                {isTesting ? "Testando..." : "Testar Conexão"}
+              </button>
+              <a 
+                href="https://aistudio.google.com/app/apikey" 
+                target="_blank" 
+                rel="noreferrer"
+                className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1 transition"
+              >
+                Gerenciar Chaves Google <ExternalLink className="w-3 h-3"/>
+              </a>
+            </div>
         </div>
         
         {/* Environment Status Indicator */}
@@ -123,7 +150,7 @@ const SettingsScreen: React.FC = () => {
               ))}
               <div className="pt-2 text-[10px] text-gray-500 italic flex items-center gap-1">
                 <Info className="w-3 h-3"/>
-                Se uma chave estiver marcada como "Aviso" no Google, a rotação automática irá ignorá-la.
+                Se o teste de conexão falhar, tente usar 'gemini-1.5-flash' no campo Modelo IA abaixo.
               </div>
            </div>
         </div>
@@ -153,6 +180,7 @@ const SettingsScreen: React.FC = () => {
               placeholder="Ex: gemini-2.0-flash"
               className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm font-mono"
             />
+            <p className="text-[10px] text-gray-500 mt-1">Recomendados: gemini-2.0-flash, gemini-1.5-flash</p>
           </div>
         </div>
 

@@ -7,6 +7,7 @@ const getModelName = (): string => {
     const local = localStorage.getItem('mara_gemini_model');
     if (local && local.trim().length > 0) return local.trim();
   }
+  // Padrão mais estável atualmente
   return 'gemini-2.0-flash';
 };
 
@@ -54,14 +55,9 @@ export const getAvailableApiKeys = (): string[] => {
   const uniqueKeys = [...new Set(keys)].filter(k => !!k);
   
   if (uniqueKeys.length > 0) {
-    console.log(`[Mara System] ${uniqueKeys.length} credenciais carregadas e prontas para rotação.`);
+    // Console log silencioso para não poluir
   } else {
-    console.warn("[Mara System] Nenhuma chave encontrada. Verifique VITE_ux_config na Vercel.");
-    // Log para debug no console do navegador
-    console.log("Debug Env Vars:", {
-      VITE_ux_config: (import.meta as any).env?.VITE_ux_config ? 'Presente' : 'Ausente',
-      VITE_APP_PARAM_1: (import.meta as any).env?.VITE_APP_PARAM_1 ? 'Presente' : 'Ausente'
-    });
+    console.warn("[Mara System] Nenhuma chave encontrada.");
   }
 
   return uniqueKeys;
@@ -87,6 +83,27 @@ const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction] }];
 // Helper para simular delay humano
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+export const testConnection = async (): Promise<{ success: boolean; message: string; keyUsed?: string }> => {
+  const keys = getAvailableApiKeys();
+  const model = getModelName();
+  
+  if (keys.length === 0) return { success: false, message: "Nenhuma chave encontrada." };
+
+  for (const apiKey of keys) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const chat = ai.chats.create({ model, history: [] });
+      await chat.sendMessage({ message: [{ text: "Oi" }] });
+      return { success: true, message: "Conexão OK!", keyUsed: apiKey.slice(-4) };
+    } catch (e: any) {
+      console.warn(`Teste falhou para chave ...${apiKey.slice(-4)}: ${e.message}`);
+      // Continua para a próxima chave
+    }
+  }
+  
+  return { success: false, message: "Todas as chaves falharam no teste." };
+};
+
 export const sendMessageToGemini = async (
   history: Message[],
   newMessage: { text?: string; audioBase64?: string; mimeType?: string },
@@ -98,14 +115,13 @@ export const sendMessageToGemini = async (
   const modelName = getModelName();
   
   // Definição do Tempo de Raciocínio (5 a 10 segundos)
-  // Isso define quanto tempo o usuário verá "Mara está digitando..."
   const minThinkingTime = 5000;
   const maxThinkingTime = 10000;
   const targetThinkingTime = Math.floor(Math.random() * (maxThinkingTime - minThinkingTime + 1) + minThinkingTime);
   const startTime = Date.now();
 
   if (apiKeys.length === 0) {
-    return "⚠️ **Erro de Sincronização (Vercel)**\n\nO sistema está rodando, mas não encontrou a chave.\n\nVá em **Configurações > Chaves de API** para ver o diagnóstico detalhado e identificar qual variável está faltando.";
+    return "⚠️ **Erro de Sincronização**\n\nNenhuma chave de API encontrada. Vá em Configurações para adicionar uma.";
   }
 
   // Preparar o histórico
@@ -131,9 +147,12 @@ export const sendMessageToGemini = async (
     currentParts.push({ text: newMessage.text });
   }
 
+  let lastError = "";
+
   // Tentar conectar com as chaves disponíveis (Rotação em caso de erro)
   for (const apiKey of apiKeys) {
     const isLastKey = apiKeys.indexOf(apiKey) === apiKeys.length - 1;
+    const keySuffix = apiKey.slice(-4);
     
     try {
       const ai = new GoogleGenAI({ apiKey });
@@ -151,7 +170,6 @@ export const sendMessageToGemini = async (
         const call = result.functionCalls[0];
         if (onToolCall) onToolCall({ name: call.name, args: call.args });
         
-        // Responde para a IA confirmar
         const finalResult = await chat.sendMessage({
           message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
         });
@@ -159,7 +177,6 @@ export const sendMessageToGemini = async (
       }
 
       // === SIMULAÇÃO DE RACIOCÍNIO HUMANO ===
-      // Se a IA respondeu muito rápido, esperamos até completar o tempo mínimo.
       const elapsedTime = Date.now() - startTime;
       if (elapsedTime < targetThinkingTime) {
         await sleep(targetThinkingTime - elapsedTime);
@@ -169,7 +186,8 @@ export const sendMessageToGemini = async (
 
     } catch (error: any) {
       const msg = error.message || '';
-      console.warn(`[Mara Rotation] Chave ...${apiKey.slice(-4)} falhou. Motivo:`, msg);
+      lastError = msg;
+      console.warn(`[Mara Rotation] Chave ...${keySuffix} falhou. Motivo:`, msg);
 
       // LÓGICA DE ROTAÇÃO OTIMIZADA
       const isRetryable = msg.includes('429') || 
@@ -180,26 +198,24 @@ export const sendMessageToGemini = async (
       const isAuthError = msg.includes('403') || 
                           msg.includes('PERMISSION_DENIED') || 
                           msg.includes('key not valid') ||
-                          msg.includes('API_KEY_INVALID'); // Google envia isso para chaves revogadas
+                          msg.includes('API_KEY_INVALID');
 
-      // Se for um erro que vale a pena tentar outra chave, e NÃO for a última chave
+      // Se for um erro recuperável e não for a última chave, tenta a próxima
       if ((isRetryable || isAuthError) && !isLastKey) {
-          console.log(`🔄 Rotação Ativada: A chave ...${apiKey.slice(-4)} está inválida ou sobrecarregada. Tentando próxima...`);
-          continue; // Pula para a próxima iteração do loop
+          console.log(`🔄 Rotação: Chave ...${keySuffix} falhou. Tentando próxima...`);
+          continue; 
       }
-
-      // Se for a última chave e falhou todas
-      if (isLastKey) {
-         if (isAuthError) {
-             return "🚫 **Problema com a Chave API**\n\nO Google bloqueou o acesso. Isso acontece se a chave foi exposta publicamente ou deletada. Por favor, gere uma nova chave no AI Studio e atualize as configurações.";
-         }
-         if (isRetryable) return "⏳ A IA está com alto volume de acessos no momento. Aguarde alguns segundos e tente novamente.";
-         return "⚠️ **Erro Técnico:** " + msg;
-      }
-      
-      continue;
     }
   }
 
-  return "⚠️ Erro desconhecido na comunicação com a IA.";
+  // Se chegou aqui, todas falharam. Retorna mensagem amigável com erro técnico.
+  if (lastError.includes('429') || lastError.includes('RESOURCE_EXHAUSTED')) {
+      return `⏳ **Sistema Sobrecarregado**\n\nA IA atingiu o limite de requisições gratuitas do Google.\n\n*Erro Técnico: ${lastError.slice(0, 100)}...*`;
+  }
+  
+  if (lastError.includes('403') || lastError.includes('API_KEY')) {
+      return `🚫 **Chave Inválida**\n\nO Google rejeitou a chave de acesso. Verifique as configurações.\n\n*Erro Técnico: ${lastError.slice(0, 100)}...*`;
+  }
+
+  return `⚠️ **Erro de Conexão**\n\nNão foi possível contatar a IA.\n\n*Erro Técnico: ${lastError.slice(0, 150)}*`;
 };
