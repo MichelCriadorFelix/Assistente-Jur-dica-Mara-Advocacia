@@ -3,12 +3,11 @@ import { Message, TeamMember, Contact } from "../types";
 import { DEFAULT_TEAM } from "../constants";
 import { learningService } from "./learningService";
 
-// LISTA DE MODELOS - ORDEM DE INTELIGÊNCIA
-// Usamos o Flash Preview mais recente para chat rápido e fluido
+// LISTA DE MODELOS ATUALIZADA - GEMINI 3 SERIES
 const MODEL_CANDIDATES = [
-  'gemini-2.0-flash-exp',      // Extremamente rápido e inteligente para chat
-  'gemini-1.5-pro',            // Backup de raciocínio
-  'gemini-1.5-flash'           // Backup de estabilidade
+  'gemini-3-flash-preview',    // Padrão para chat rápido e inteligente
+  'gemini-3-pro-preview',      // Raciocínio complexo se o flash falhar
+  'gemini-2.0-flash-exp'       // Fallback legado
 ];
 
 const cleanKey = (key: string | undefined): string => {
@@ -60,26 +59,28 @@ export const getAvailableApiKeys = (): string[] => {
 
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
-  description: 'Gera o relatório final de triagem para os advogados e marca o atendimento como concluído.',
+  description: 'Gera o relatório de triagem PREVIDENCIÁRIA quando tiver informações suficientes.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       clientName: { type: Type.STRING },
-      legalSummary: { type: Type.STRING, description: "Resumo jurídico técnico (Fatos + Direito) para o advogado." },
-      area: { type: Type.STRING, description: "Área do direito: Previdenciário, Trabalhista, Família ou Cível." },
-      priority: { type: Type.STRING, enum: ["ALTA", "MEDIA", "BAIXA"] }
+      benefitType: { type: Type.STRING },
+      summary: { type: Type.STRING },
+      missingDocs: { type: Type.STRING },
+      urgency: { type: Type.STRING, enum: ["ALTA", "MEDIA", "BAIXA"] },
+      analysis: { type: Type.STRING }
     },
-    required: ['clientName', 'legalSummary', 'area', 'priority'],
+    required: ['clientName', 'benefitType', 'summary', 'urgency'],
   },
 };
 
 const saveKnowledgeFunction: FunctionDeclaration = {
   name: 'save_knowledge',
-  description: 'Use esta função para MEMORIZAR uma nova regra, correção ou preferência ensinada pelo usuário.',
+  description: 'Memoriza uma nova regra ou preferência.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      fact: { type: Type.STRING, description: "O fato ou regra a ser memorizada." },
+      fact: { type: Type.STRING },
       category: { type: Type.STRING, enum: ["preference", "legal_rule", "correction", "vocabulary"] }
     },
     required: ['fact', 'category'],
@@ -99,37 +100,34 @@ export const sendMessageToGemini = async (
 ): Promise<string> => {
   
   let apiKeys = getAvailableApiKeys();
-  if (apiKeys.length === 0) return "⚠️ Erro: Chave de API não configurada.";
+  if (apiKeys.length === 0) return "⚠️ Erro de Sistema: Nenhuma chave de API configurada. Contate o administrador.";
   apiKeys = shuffleArray(apiKeys);
 
   const memories = await learningService.getAllMemories();
-  const knowledgeBase = memories.map(m => `- [APRENDIZADO]: ${m.content}`).join('\n');
+  const knowledgeBase = memories.map(m => `- ${m.content}`).join('\n');
 
   let finalPrompt = systemInstruction;
 
-  if (memories.length > 0) {
-    finalPrompt += `\n\n### 🧠 MINHA MEMÓRIA EVOLUTIVA:\n${knowledgeBase}`;
+  // Contexto Dinâmico
+  const clientType = contactContext?.clientType === 'returning' ? 'CLIENTE DA CARTEIRA (JÁ É CLIENTE)' : 'POSSÍVEL NOVO CLIENTE';
+  finalPrompt += `\n\n### CONTEXTO ATUAL:\nStatus: **${clientType}**`;
+
+  if (knowledgeBase) {
+    finalPrompt += `\n\n### REGRAS INTERNAS APRENDIDAS:\n${knowledgeBase}`;
   }
 
-  try {
-     const savedTeam = localStorage.getItem('mara_team_config');
-     const team: TeamMember[] = savedTeam ? JSON.parse(savedTeam) : DEFAULT_TEAM;
-     const teamList = team.filter(t => t.active).map(t => `- ${t.name} (${t.role})`).join('\n');
-     finalPrompt += `\n\n### 👥 NOSSA EQUIPE:\n${teamList}`;
-  } catch(e) {}
-
   if (contactContext?.legalSummary) {
-    finalPrompt += `\n\n### 📂 MEMÓRIA DO CASO:\n"${contactContext.legalSummary}"`;
+    finalPrompt += `\n\n### O QUE JÁ SABEMOS DESTE CASO:\n"${contactContext.legalSummary}"\n(Use isso para mostrar que você tem memória)`;
   }
   
   if (contactContext?.caseStatus) {
-    finalPrompt += `\n\n### ⚖️ STATUS PROCESSUAL:\n"${contactContext.caseStatus}"`;
+    finalPrompt += `\n\n### STATUS DO PROCESSO (RESPONDER SE PERGUNTADO):\n"${contactContext.caseStatus}"`;
   }
 
-  // Prepara histórico
-  const recentHistory = history.slice(-30).map(m => ({
+  // Prepara histórico (limita para manter foco)
+  const recentHistory = history.slice(-20).map(m => ({
     role: m.role,
-    parts: [{ text: m.type === 'audio' ? '[ÁUDIO ENVIADO PELO CLIENTE]' : m.content }]
+    parts: [{ text: m.type === 'audio' ? '[O USUÁRIO ENVIOU UM ÁUDIO]' : m.content }]
   }));
 
   const currentParts: Part[] = [];
@@ -141,13 +139,14 @@ export const sendMessageToGemini = async (
         data: newMessage.audioBase64
       }
     });
-    // Instrução reforçada para áudio
-    currentParts.push({ text: "O usuário enviou este ÁUDIO. Ouça, entenda o tom de voz e responda naturalmente." });
+    currentParts.push({ text: "O usuário enviou este ÁUDIO. Transcreva mentalmente a intenção, ignore erros de português e responda como uma advogada humana e empática." });
   }
   
   if (newMessage.text) {
     currentParts.push({ text: newMessage.text });
   }
+
+  let lastError = null;
 
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
@@ -159,13 +158,15 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.7, // Aumentado para maior fluidez e naturalidade na conversa
+            temperature: 0.8, // Mais alta para naturalidade e "ginga" humana
           },
           history: recentHistory
         });
 
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 25000));
+        // Timeout de segurança
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 20000));
         const apiPromise = chat.sendMessage({ message: currentParts });
+        
         const result: any = await Promise.race([apiPromise, timeoutPromise]);
         
         let responseText = result.text || "";
@@ -174,15 +175,24 @@ export const sendMessageToGemini = async (
            for (const call of result.functionCalls) {
              if (call.name === 'save_knowledge') {
                 await learningService.addMemory(call.args.fact, call.args.category);
+                // Resposta invisível para confirmar ação
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "Memorizado." } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
                 });
                 responseText = toolResp.text;
              }
              else if (call.name === 'notificar_equipe' && onToolCall) {
-                onToolCall({ name: call.name, args: call.args });
+                onToolCall({ 
+                  name: call.name, 
+                  args: {
+                    ...call.args,
+                    legalSummary: call.args.summary, 
+                    area: 'PREVIDENCIÁRIO',
+                    priority: call.args.urgency
+                  } 
+                });
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "Success" } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório Salvo." } } }]
                 });
                 responseText = toolResp.text;
              }
@@ -192,13 +202,16 @@ export const sendMessageToGemini = async (
         if (responseText) return responseText;
 
       } catch (e: any) {
+        console.warn(`Falha no modelo ${modelName}:`, e.message);
+        lastError = e;
+        // Se for erro de cota (429), tenta próxima chave. Se for outro, tenta próximo modelo.
         if (e.message?.includes('429')) break; 
       }
     }
   }
 
-  // Fallback se tudo falhar, mas tenta não deixar vazio
-  return "Olá! Tive uma pequena oscilação no sinal, mas já voltei. Poderia repetir a última parte?";
+  console.error("Todas as tentativas falharam.", lastError);
+  return "Desculpe, o sistema do escritório está momentaneamente fora do ar. Poderia me enviar novamente sua mensagem em instantes?";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
@@ -207,11 +220,12 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
 
   try {
     const ai = new GoogleGenAI({ apiKey: keys[0] });
+    // Teste com Gemini 3 Flash para garantir compatibilidade
     await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: "Ping",
     });
-    return { success: true, message: "Conexão OK!" };
+    return { success: true, message: "Conexão Gemini 3 Estabelecida!" };
   } catch (e: any) {
     return { success: false, message: e.message };
   }

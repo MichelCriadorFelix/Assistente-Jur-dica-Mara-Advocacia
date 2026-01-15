@@ -15,6 +15,9 @@ export interface Contact {
   avatar: string;
   unreadCount: number;
   status: 'new' | 'triaged' | 'urgent';
+  clientType?: 'new' | 'returning'; // Novo Cliente ou Cliente Antigo
+  cpf?: string; // Dado crítico para o previdenciário
+  benefitType?: string; // BPC, Aposentadoria, Auxílio-Doença
   caseStatus?: string; // Informações sobre andamento processual (Advogado -> Cliente)
   legalSummary?: string; // Memória da IA sobre o caso (IA -> IA)
   aiPaused?: boolean; // Se true, a IA não responde automaticamente

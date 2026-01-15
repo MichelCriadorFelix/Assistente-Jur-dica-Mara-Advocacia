@@ -3,8 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 // Helper para ler configurações
 const getEnvVar = (key: string) => {
   // 1. Tenta ler do import.meta.env (Vite standard)
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
-    return import.meta.env[key];
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) {
+    return (import.meta as any).env[key];
   }
   // 2. Tenta ler do process.env (Vercel/Node fallback)
   if (typeof process !== 'undefined' && process.env && process.env[key]) {

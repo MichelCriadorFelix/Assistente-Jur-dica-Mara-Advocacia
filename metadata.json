@@ -1,6 +1,6 @@
 {
-  "name": "Copy of Mara - Assistente Jurídica",
-  "description": "Sistema de atendimento jurídico automatizado com IA (Gemini), simulando interface WhatsApp e Dashboard Administrativo.",
+  "name": "Assistente Dr. Michel Felix - Previdenciário",
+  "description": "Assistente Virtual Especialista em Direito Previdenciário do Dr. Michel Felix.",
   "requestFramePermissions": [
     "microphone"
   ]
