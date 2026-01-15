@@ -3,12 +3,11 @@ import { Message, TeamMember, Contact } from "../types";
 import { DEFAULT_TEAM } from "../constants";
 import { learningService } from "./learningService";
 
-// LISTA DE MODELOS ATUALIZADA - PRIORIDADE PARA FLASH (ALTA DISPONIBILIDADE)
+// LISTA DE MODELOS ATUALIZADA - ALTA DISPONIBILIDADE E ESTABILIDADE
 const MODEL_CANDIDATES = [
-  'gemini-2.0-flash',          // Prioridade 1: Estável, Rápido e Cota Alta
-  'gemini-2.0-flash-exp',      // Prioridade 2: Experimental (ótimo para fallback)
-  'gemini-3-flash-preview',    // Prioridade 3: Nova geração (se disponível)
-  'gemini-3-pro-preview'       // Prioridade 4: Raciocínio complexo (mais lento/limitado)
+  'gemini-2.0-flash-exp',      // Prioridade 1: O mais rápido e "sem limites" atual
+  'gemini-flash-latest',       // Prioridade 2: (Gemini 1.5 Flash) - Backup sólido e estável
+  'gemini-3-flash-preview',    // Prioridade 3: Nova geração (se disponível e tiver cota)
 ];
 
 const cleanKey = (key: string | undefined): string => {
@@ -252,11 +251,9 @@ export const sendMessageToGemini = async (
         if (responseText) return responseText;
 
       } catch (e: any) {
-        // Se for erro de cota (429), apenas loga e tenta o próximo modelo/chave
         console.warn(`Tentativa falhou no modelo ${modelName} com chave ending in ...${apiKey.slice(-4)}:`, e.message);
         lastError = e;
-        
-        // Se o erro NÃO for 429 ou 503 (Serviço indisponível), talvez seja erro de lógica, mas vamos continuar tentando
+        // Não damos break aqui, tentamos o próximo modelo na lista (fallback)
       }
     }
   }
@@ -271,12 +268,12 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
 
   try {
     const ai = new GoogleGenAI({ apiKey: keys[0] });
-    // Teste com o modelo mais leve
+    // Teste com o modelo flash-latest (mais estável para teste de ping)
     await ai.models.generateContent({
-      model: 'gemini-2.0-flash', 
+      model: 'gemini-flash-latest', 
       contents: "Ping",
     });
-    return { success: true, message: "Conexão Gemini 2.0 Flash Estabelecida!" };
+    return { success: true, message: "Conexão Gemini (Flash) Estabelecida!" };
   } catch (e: any) {
     return { success: false, message: e.message };
   }
