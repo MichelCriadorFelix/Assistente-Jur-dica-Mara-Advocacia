@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Key, Users, Save, Trash2, Plus, Bot, Phone, CheckCircle, AlertCircle } from 'lucide-react';
+import { Database, Key, Users, Save, Trash2, Plus, Bot, Phone, CheckCircle, AlertCircle, Server, Globe, ShieldCheck } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys, testConnection, getAvailableApiKeysMap } from '../services/geminiService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
@@ -9,6 +9,7 @@ import { INITIAL_CONFIG, DEFAULT_TEAM } from '../constants';
 const SettingsScreen: React.FC = () => {
   // Configuração Geral (Prompt + Team)
   const [config, setConfig] = useState<AppConfig>(INITIAL_CONFIG);
+  const [activeTab, setActiveTab] = useState<'team' | 'ai' | 'whatsapp'>('team');
   
   // API Keys States
   const [apiKey, setApiKey] = useState('');
@@ -16,6 +17,13 @@ const SettingsScreen: React.FC = () => {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string>('');
   const [keysMap, setKeysMap] = useState<Record<string, string>>({});
+  
+  // WhatsApp Integration States
+  const [waConfig, setWaConfig] = useState({
+     apiUrl: '',
+     apiToken: '',
+     instanceName: ''
+  });
   
   const sbUrlDisplay = 'https://drcxpekguouqsoinaoeb.supabase.co';
 
@@ -35,6 +43,10 @@ const SettingsScreen: React.FC = () => {
     // Se tiver manual, carrega, senão deixa vazio (pois usa a automática)
     const sbk = localStorage.getItem('mara_supabase_key');
     if (sbk) setSbKey(sbk);
+    
+    // Carregar config WhatsApp
+    const wa = localStorage.getItem('mara_whatsapp_config');
+    if (wa) setWaConfig(JSON.parse(wa));
 
     refreshKeyCount();
   }, []);
@@ -111,6 +123,11 @@ const SettingsScreen: React.FC = () => {
       window.location.reload();
     }
   };
+  
+  const handleSaveWhatsapp = () => {
+     localStorage.setItem('mara_whatsapp_config', JSON.stringify(waConfig));
+     alert("Configuração de Gateway salva. \n\nNota: Para que funcione, você precisa configurar o Webhook na sua plataforma de API (Evolution/Z-API) apontando para este App.");
+  };
 
   const handleClearLocalData = () => {
     if (confirm("Apagar dados locais (cache)? Isso não apaga o Supabase.")) {
@@ -124,174 +141,248 @@ const SettingsScreen: React.FC = () => {
   const isSupabaseManual = !!localStorage.getItem('mara_supabase_key');
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-10">
-      
-      {/* SECTION 1: TEAM MANAGEMENT */}
-      <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border-l-4 border-blue-500">
-        <div className="flex justify-between items-center mb-6">
-           <h2 className="text-xl font-bold dark:text-white flex items-center gap-2">
-              <Users className="w-6 h-6 text-blue-600" /> Equipe do Escritório
-           </h2>
-           <button onClick={handleSaveTeam} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium">
-             <Save className="w-4 h-4" /> Salvar Equipe
-           </button>
-        </div>
-        
-        <p className="text-sm text-gray-500 mb-4">
-          Cadastre o WhatsApp (com DDD) para habilitar o encaminhamento rápido de relatórios.
-        </p>
+    <div className="max-w-4xl mx-auto pb-10">
+      <h1 className="text-2xl font-bold dark:text-white mb-6">Configurações do Sistema</h1>
 
-        <div className="space-y-4">
-          {config.team.map((member) => (
-            <div key={member.id} className="flex flex-col md:flex-row gap-3 items-start md:items-center bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-               <div className="flex-1 w-full">
-                 <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Nome</label>
-                 <input 
-                   type="text" 
-                   value={member.name}
-                   onChange={(e) => handleUpdateMember(member.id, 'name', e.target.value)}
-                   className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-gray-800 dark:text-gray-200 font-medium py-1"
-                   placeholder="Nome"
-                 />
+      {/* Tabs */}
+      <div className="flex border-b dark:border-gray-700 mb-6 overflow-x-auto">
+        {[
+          { id: 'team', label: 'Equipe', icon: Users },
+          { id: 'ai', label: 'IA & Chaves', icon: Bot },
+          { id: 'whatsapp', label: 'Integração WhatsApp', icon: Phone },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`flex items-center gap-2 px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${
+              activeTab === tab.id 
+                ? 'border-b-2 border-emerald-500 text-emerald-600 dark:text-emerald-400' 
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      
+      {/* TAB: TEAM MANAGEMENT */}
+      {activeTab === 'team' && (
+        <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border border-gray-100 dark:border-gray-700">
+          <div className="flex justify-between items-center mb-6">
+             <h2 className="text-lg font-bold dark:text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-blue-600" /> Membros & Telefones
+             </h2>
+             <button onClick={handleSaveTeam} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center gap-2 text-sm font-medium">
+               <Save className="w-4 h-4" /> Salvar Alterações
+             </button>
+          </div>
+          
+          <p className="text-sm text-gray-500 mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded text-blue-800 dark:text-blue-200">
+            Estes números receberão os relatórios de triagem via link direto do WhatsApp.
+          </p>
+  
+          <div className="space-y-4">
+            {config.team.map((member) => (
+              <div key={member.id} className="flex flex-col md:flex-row gap-3 items-start md:items-center bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                 <div className="flex-1 w-full">
+                   <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Nome</label>
+                   <input 
+                     type="text" 
+                     value={member.name}
+                     onChange={(e) => handleUpdateMember(member.id, 'name', e.target.value)}
+                     className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-gray-800 dark:text-gray-200 font-medium py-1"
+                   />
+                 </div>
+                 <div className="flex-1 w-full">
+                   <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Função</label>
+                   <input 
+                     type="text" 
+                     value={member.role}
+                     onChange={(e) => handleUpdateMember(member.id, 'role', e.target.value)}
+                     className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-sm text-gray-600 dark:text-gray-300 py-1"
+                   />
+                 </div>
+                 <div className="flex-1 w-full">
+                   <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                      <Phone className="w-3 h-3" /> WhatsApp (DDD+Num)
+                   </label>
+                   <input 
+                     type="text" 
+                     value={member.phone || ''}
+                     onChange={(e) => handleUpdateMember(member.id, 'phone', e.target.value)}
+                     className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-sm text-gray-600 dark:text-gray-300 py-1 font-mono"
+                     placeholder="5511999999999"
+                   />
+                 </div>
+                 <button 
+                   onClick={() => handleRemoveMember(member.id)}
+                   className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition"
+                 >
+                   <Trash2 className="w-4 h-4" />
+                 </button>
+              </div>
+            ))}
+            <button 
+              onClick={handleAddMember}
+              className="w-full py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-gray-400 hover:text-blue-500 hover:border-blue-400 transition flex items-center justify-center gap-2 font-medium"
+            >
+              <Plus className="w-4 h-4" /> Adicionar Membro
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: AI & KEYS */}
+      {activeTab === 'ai' && (
+        <div className="space-y-6">
+          {/* Gemini Section */}
+          <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border border-gray-100 dark:border-gray-700">
+            <h2 className="text-lg font-bold dark:text-white flex items-center gap-2 mb-4">
+               <Bot className="w-5 h-5 text-emerald-600" /> Inteligência Artificial (Gemini)
+            </h2>
+            
+            <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
+               <div className="flex justify-between items-center mb-4">
+                  <span className="font-bold text-gray-700 dark:text-gray-300">
+                    {detectedKeysCount} Chave(s) Detectada(s)
+                  </span>
+                  <button onClick={handleTestConnection} disabled={isTesting} className="text-xs bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700 font-bold shadow">
+                    {isTesting ? 'Testando...' : 'Testar Conexão'}
+                  </button>
                </div>
-               <div className="flex-1 w-full">
-                 <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Função</label>
-                 <input 
-                   type="text" 
-                   value={member.role}
-                   onChange={(e) => handleUpdateMember(member.id, 'role', e.target.value)}
-                   className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-sm text-gray-600 dark:text-gray-300 py-1"
-                   placeholder="Função"
-                 />
+               
+               {testResult && (
+                 <div className={`p-3 mb-3 rounded text-sm font-mono border break-words ${testResult.includes('SUCESSO') || testResult.includes('✅') ? 'bg-green-100 text-green-900 border-green-200' : 'bg-red-100 text-red-900 border-red-200'}`}>
+                   {testResult}
+                 </div>
+               )}
+            </div>
+            
+            <div className="flex gap-4 items-end">
+               <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Adicionar Chave Manualmente (Override)</label>
+                  <input 
+                    type="password" 
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="Cole sua API Key aqui..."
+                    className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
+                  />
                </div>
-               <div className="flex-1 w-full">
-                 <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                    <Phone className="w-3 h-3" /> WhatsApp
-                 </label>
-                 <input 
-                   type="text" 
-                   value={member.phone || ''}
-                   onChange={(e) => handleUpdateMember(member.id, 'phone', e.target.value)}
-                   className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-sm text-gray-600 dark:text-gray-300 py-1 font-mono"
-                   placeholder="5511..."
-                 />
-               </div>
-               <button 
-                 onClick={() => handleRemoveMember(member.id)}
-                 className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition"
-               >
-                 <Trash2 className="w-4 h-4" />
+               <button onClick={handleSaveApi} className="bg-gray-800 text-white px-4 py-2 rounded h-10 hover:bg-black">
+                  Salvar
                </button>
             </div>
-          ))}
-          <button 
-            onClick={handleAddMember}
-            className="w-full py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-gray-400 hover:text-blue-500 hover:border-blue-400 transition flex items-center justify-center gap-2 font-medium"
-          >
-            <Plus className="w-4 h-4" /> Adicionar Membro
-          </button>
-        </div>
-      </div>
-
-      {/* SECTION 2: AI SETTINGS */}
-      <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border-l-4 border-emerald-500">
-        <h2 className="text-xl font-bold dark:text-white flex items-center gap-2 mb-4">
-           <Bot className="w-6 h-6 text-emerald-600" /> Inteligência Artificial (Gemini)
-        </h2>
-        
-        <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
-           <div className="flex justify-between items-center mb-4">
-              <span className="font-bold text-gray-700 dark:text-gray-300">
-                {detectedKeysCount} Chave(s) Detectada(s)
-              </span>
-              <button onClick={handleTestConnection} disabled={isTesting} className="text-xs bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700 font-bold shadow">
-                {isTesting ? 'Testando...' : 'Testar Conexão'}
-              </button>
-           </div>
-           
-           {testResult && (
-             <div className={`p-3 mb-3 rounded text-sm font-mono border break-words ${testResult.includes('SUCESSO') || testResult.includes('✅') ? 'bg-green-100 text-green-900 border-green-200' : 'bg-red-100 text-red-900 border-red-200'}`}>
-               {testResult}
-             </div>
-           )}
-
-           <div className="mb-4 text-xs text-gray-500">
-              <p>Chaves disponíveis no ambiente:</p>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {Object.keys(keysMap).map((k) => (
-                  <span key={k} className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded font-mono">{k}</span>
-                ))}
-              </div>
-           </div>
-        </div>
-        
-        <div className="flex gap-4 items-end">
-           <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Adicionar Chave Manualmente (Override)</label>
-              <input 
-                type="password" 
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Cole sua API Key aqui..."
-                className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
-              />
-           </div>
-           <button onClick={handleSaveApi} className="bg-gray-800 text-white px-4 py-2 rounded h-10 hover:bg-black">
-              Salvar
-           </button>
-        </div>
-      </div>
-
-      {/* SECTION 3: DATABASE */}
-      <div className={`p-8 rounded-xl shadow-md border-l-4 ${isSupabaseConfigured ? 'border-green-500' : 'border-yellow-500'} bg-white dark:bg-gray-800`}>
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold dark:text-white flex items-center gap-2">
-            <Database className="w-5 h-5" /> Banco de Dados (Supabase)
-          </h2>
-          
-          {isSupabaseConfigured ? (
-             <span className="flex items-center gap-2 text-green-600 bg-green-50 dark:bg-green-900/30 px-3 py-1 rounded-full text-xs font-bold border border-green-200 dark:border-green-800">
-                <CheckCircle className="w-4 h-4" /> 
-                {isSupabaseManual ? 'Conectado (Manual)' : 'Conectado (Automático)'}
-             </span>
-          ) : (
-             <span className="flex items-center gap-2 text-yellow-600 bg-yellow-50 px-3 py-1 rounded-full text-xs font-bold border border-yellow-200">
-                <AlertCircle className="w-4 h-4" /> Modo Local (Offline)
-             </span>
-          )}
-        </div>
-
-        {isSupabaseConfigured && !isSupabaseManual ? (
-          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-4 text-sm text-blue-800 dark:text-blue-200 border border-blue-100 dark:border-blue-800">
-             <p>O sistema detectou automaticamente as variáveis de ambiente do Supabase na Vercel.</p>
-             <p className="mt-1 font-semibold">Nenhuma ação é necessária.</p>
           </div>
-        ) : null}
 
-        <div className="flex gap-4 items-end opacity-90 hover:opacity-100 transition-opacity">
-           <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                 {isSupabaseConfigured && !isSupabaseManual ? 'Sobrescrever Chave Anon (Opcional)' : 'Chave Anon'}
-              </label>
-              <input 
-                type="password" 
-                value={sbKey}
-                onChange={(e) => setSbKey(e.target.value)}
-                placeholder="Chave pública do Supabase"
-                className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
-              />
-           </div>
-           <button onClick={handleSaveSupabase} className={`${sbKey ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-500 hover:bg-red-600'} text-white px-4 py-2 rounded h-10 transition-colors`}>
-              {sbKey ? 'Conectar' : 'Remover Manual'}
-           </button>
+          {/* Supabase Section */}
+          <div className={`p-8 rounded-xl shadow-md border-l-4 ${isSupabaseConfigured ? 'border-green-500' : 'border-yellow-500'} bg-white dark:bg-gray-800`}>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold dark:text-white flex items-center gap-2">
+                <Database className="w-5 h-5" /> Banco de Dados (Supabase)
+              </h2>
+              
+              {isSupabaseConfigured ? (
+                 <span className="flex items-center gap-2 text-green-600 bg-green-50 dark:bg-green-900/30 px-3 py-1 rounded-full text-xs font-bold border border-green-200 dark:border-green-800">
+                    <CheckCircle className="w-4 h-4" /> 
+                    {isSupabaseManual ? 'Conectado (Manual)' : 'Conectado (Automático)'}
+                 </span>
+              ) : (
+                 <span className="flex items-center gap-2 text-yellow-600 bg-yellow-50 px-3 py-1 rounded-full text-xs font-bold border border-yellow-200">
+                    <AlertCircle className="w-4 h-4" /> Modo Local (Offline)
+                 </span>
+              )}
+            </div>
+
+            <div className="flex gap-4 items-end opacity-90 hover:opacity-100 transition-opacity">
+               <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                     {isSupabaseConfigured && !isSupabaseManual ? 'Sobrescrever Chave Anon (Opcional)' : 'Chave Anon'}
+                  </label>
+                  <input 
+                    type="password" 
+                    value={sbKey}
+                    onChange={(e) => setSbKey(e.target.value)}
+                    placeholder="Chave pública do Supabase"
+                    className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
+                  />
+               </div>
+               <button onClick={handleSaveSupabase} className={`${sbKey ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-500 hover:bg-red-600'} text-white px-4 py-2 rounded h-10 transition-colors`}>
+                  {sbKey ? 'Conectar' : 'Remover Manual'}
+               </button>
+            </div>
+            
+            <div className="mt-6 pt-6 border-t dark:border-gray-700 flex justify-end">
+                <button onClick={handleClearLocalData} className="text-gray-400 text-xs hover:text-red-500 hover:underline">
+                   Limpar Cache Local do Navegador
+                </button>
+            </div>
+          </div>
         </div>
-        
-        <div className="mt-6 pt-6 border-t dark:border-gray-700 flex justify-end">
-            <button onClick={handleClearLocalData} className="text-gray-400 text-xs hover:text-red-500 hover:underline">
-               Limpar Cache Local do Navegador
-            </button>
-        </div>
-      </div>
+      )}
+
+      {/* TAB: WHATSAPP INTEGRATION */}
+      {activeTab === 'whatsapp' && (
+         <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border border-gray-100 dark:border-gray-700">
+             <div className="flex items-center gap-3 mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800 rounded-lg text-yellow-800 dark:text-yellow-500">
+                 <Server className="w-8 h-8 flex-shrink-0" />
+                 <div className="text-sm">
+                    <p className="font-bold">Para conectar seu número real, você precisa de um Gateway.</p>
+                    <p className="mt-1">Este Web App funciona como o "cérebro" da IA. Para que ela "tenha um corpo" (WhatsApp), ela precisa ser ligada a uma API como <strong>Evolution API, Z-API ou Twilio</strong>.</p>
+                 </div>
+             </div>
+
+             <h2 className="text-lg font-bold dark:text-white flex items-center gap-2 mb-6">
+                <Globe className="w-5 h-5 text-purple-600" /> Configuração do Gateway (API Externa)
+             </h2>
+
+             <div className="space-y-4">
+                <div>
+                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nome da Instância</label>
+                   <input 
+                     type="text" 
+                     placeholder="Ex: Escritorio_Dr_Michel"
+                     className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
+                     value={waConfig.instanceName}
+                     onChange={e => setWaConfig({...waConfig, instanceName: e.target.value})}
+                   />
+                </div>
+                <div>
+                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">URL da API (Webhook de Envio)</label>
+                   <input 
+                     type="text" 
+                     placeholder="Ex: https://api.z-api.io/instances/..."
+                     className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
+                     value={waConfig.apiUrl}
+                     onChange={e => setWaConfig({...waConfig, apiUrl: e.target.value})}
+                   />
+                </div>
+                <div>
+                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Token de Acesso / Secret</label>
+                   <input 
+                     type="password" 
+                     placeholder="Cole o token da sua API aqui"
+                     className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
+                     value={waConfig.apiToken}
+                     onChange={e => setWaConfig({...waConfig, apiToken: e.target.value})}
+                   />
+                </div>
+                
+                <div className="pt-4">
+                   <button 
+                     onClick={handleSaveWhatsapp}
+                     className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-bold shadow transition flex items-center justify-center gap-2"
+                   >
+                      <ShieldCheck className="w-5 h-5" /> Salvar Configuração de API
+                   </button>
+                   <p className="text-xs text-center text-gray-400 mt-3">
+                      * Ao salvar, você deve configurar o <strong>Webhook</strong> na sua plataforma de API para apontar para este app.
+                   </p>
+                </div>
+             </div>
+         </div>
+      )}
     </div>
   );
 };
