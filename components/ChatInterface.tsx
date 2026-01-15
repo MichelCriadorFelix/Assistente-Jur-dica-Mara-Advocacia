@@ -35,15 +35,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Boas-vindas Simplificada e Objetiva
+           // Boas-vindas Simplificada e Estratégica
            let welcomeText = '';
            
            // Lógica de "Contato Salvo" vs "Desconhecido"
            if (details?.name && details.name !== 'Novo Cliente' && details.name !== 'User') {
-              // Cliente Salvo (Já sabemos o nome)
-              welcomeText = `Olá, ${details.name}! Aqui é a Mara, do escritório do Dr. Michel.\n\nO que aconteceu? Como posso ajudar?`;
+              // Cliente Salvo (Já sabemos o nome) -> Abordagem de Retorno
+              welcomeText = `Bom falar com você novamente, ${details.name}!\n\nO senhor pode resumir o seu caso? Pode ser por escrito ou por áudio, como preferir.`;
            } else {
-              // Cliente Novo (Só temos o número)
+              // Cliente Novo (Só temos o número) -> Abordagem Inicial
               welcomeText = `Olá! Sou a Mara, assistente do Dr. Michel Felix.\n\nPara começar, qual é o seu nome?`;
            }
 
