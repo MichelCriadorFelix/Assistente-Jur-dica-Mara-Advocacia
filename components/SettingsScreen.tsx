@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Key, Users, Save, Trash2, Plus, Bot } from 'lucide-react';
+import { Database, Key, Users, Save, Trash2, Plus, Bot, Phone } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys, testConnection, getAvailableApiKeysMap } from '../services/geminiService';
 import { AppConfig, TeamMember } from '../types';
@@ -54,6 +54,7 @@ const SettingsScreen: React.FC = () => {
       id: Date.now().toString(),
       name: 'Novo Membro',
       role: 'Função',
+      phone: '',
       active: true
     };
     setConfig({ ...config, team: [...config.team, newMember] });
@@ -67,9 +68,7 @@ const SettingsScreen: React.FC = () => {
 
   const handleSaveTeam = () => {
     localStorage.setItem('mara_team_config', JSON.stringify(config.team));
-    // Atualiza também o prompt no localStorage para que a IA pegue os nomes novos
-    // (Num app real, isso seria reconstruído no backend)
-    alert('Equipe atualizada! A Mara agora conhece esses profissionais.');
+    alert('Equipe e números de WhatsApp atualizados com sucesso!');
   };
 
   // --- CONNECTION TESTS ---
@@ -139,34 +138,52 @@ const SettingsScreen: React.FC = () => {
         </div>
         
         <p className="text-sm text-gray-500 mb-4">
-          A Mara usará essas informações para direcionar os clientes corretamente. Mantenha atualizado.
+          Cadastre o WhatsApp (com DDD) para habilitar o encaminhamento rápido de relatórios.
         </p>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           {config.team.map((member) => (
-            <div key={member.id} className="flex flex-col md:flex-row gap-2 items-center bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div key={member.id} className="flex flex-col md:flex-row gap-3 items-start md:items-center bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+               
                <div className="flex-1 w-full">
-                 <label className="text-xs text-gray-400 font-bold uppercase">Nome</label>
+                 <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Nome</label>
                  <input 
                    type="text" 
                    value={member.name}
                    onChange={(e) => handleUpdateMember(member.id, 'name', e.target.value)}
-                   className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-gray-800 dark:text-gray-200 font-medium"
+                   className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-gray-800 dark:text-gray-200 font-medium py-1"
+                   placeholder="Nome do Membro"
                  />
                </div>
+               
                <div className="flex-1 w-full">
-                 <label className="text-xs text-gray-400 font-bold uppercase">Função / Especialidade</label>
+                 <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Função</label>
                  <input 
                    type="text" 
                    value={member.role}
                    onChange={(e) => handleUpdateMember(member.id, 'role', e.target.value)}
-                   className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-sm text-gray-600 dark:text-gray-300"
+                   className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-sm text-gray-600 dark:text-gray-300 py-1"
+                   placeholder="Ex: Advogado"
                  />
                </div>
+
+               <div className="flex-1 w-full">
+                 <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                    <Phone className="w-3 h-3" /> WhatsApp (55...)
+                 </label>
+                 <input 
+                   type="text" 
+                   value={member.phone || ''}
+                   onChange={(e) => handleUpdateMember(member.id, 'phone', e.target.value)}
+                   className="w-full bg-transparent border-b border-gray-300 dark:border-gray-600 focus:border-blue-500 outline-none text-sm text-gray-600 dark:text-gray-300 py-1 font-mono"
+                   placeholder="5511999999999"
+                 />
+               </div>
+
                <button 
                  onClick={() => handleRemoveMember(member.id)}
-                 className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition"
-                 title="Remover"
+                 className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition mt-2 md:mt-0"
+                 title="Remover Membro"
                >
                  <Trash2 className="w-4 h-4" />
                </button>

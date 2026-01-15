@@ -2,8 +2,8 @@ import { AppConfig, Contact, TeamMember } from './types';
 
 // Equipe Atualizada
 export const DEFAULT_TEAM: TeamMember[] = [
-  { id: '1', name: 'Dr. Michel Felix', role: 'Advogado Especialista em Previdenciário', active: true },
-  { id: '2', name: 'Fabrícia Sousa', role: 'Gerente Administrativa / Digitalização e Contratos', active: true },
+  { id: '1', name: 'Dr. Michel Felix', role: 'Advogado Especialista em Previdenciário', phone: '', active: true },
+  { id: '2', name: 'Fabrícia Sousa', role: 'Gerente Administrativa', phone: '', active: true },
 ];
 
 export const INITIAL_SYSTEM_PROMPT = `ATUE COMO: **Mara**, Assistente Jurídica Inteligente do escritório Dr. Michel Felix.

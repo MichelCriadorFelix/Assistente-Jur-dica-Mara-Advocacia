@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Message, Contact, AppConfig } from '../types';
-import { Search, Bot, User, RefreshCw, Save, Filter, FileText, Check, Send, AlertTriangle, PlayCircle, PauseCircle, ClipboardList } from 'lucide-react';
+import { Search, Bot, User, RefreshCw, Save, Filter, FileText, Check, Send, AlertTriangle, PlayCircle, PauseCircle, ClipboardList, Share2, ExternalLink } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 
@@ -145,6 +145,12 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
     setStaffInput('');
     setIsSendingStaff(false);
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const getWhatsappLink = (phone: string, text: string) => {
+    const cleanPhone = phone.replace(/\D/g, '');
+    const encodedText = encodeURIComponent(text);
+    return `https://wa.me/${cleanPhone}?text=${encodedText}`;
   };
 
   const filteredContacts = contacts.filter(contact => {
@@ -418,8 +424,36 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                                 <h3>Relatório da IA</h3>
                              </div>
                              {selectedContact?.legalSummary ? (
-                               <div className="bg-green-50 border border-green-200 p-3 rounded-lg text-sm font-mono text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                                  {selectedContact.legalSummary}
+                               <div className="flex flex-col gap-3">
+                                  <div className="bg-green-50 border border-green-200 p-3 rounded-lg text-sm font-mono text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                                      {selectedContact.legalSummary}
+                                  </div>
+
+                                  <div className="mt-2 border-t pt-4 dark:border-gray-700">
+                                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1">
+                                        <Share2 className="w-3 h-3" /> Encaminhar Relatório
+                                     </h4>
+                                     
+                                     {config.team.filter(m => m.active && m.phone).length > 0 ? (
+                                        <div className="space-y-2">
+                                           {config.team.filter(m => m.active && m.phone).map(member => (
+                                              <a 
+                                                key={member.id}
+                                                href={getWhatsappLink(member.phone!, `*Relatório de Triagem - ${selectedContact.name}*\n\n${selectedContact.legalSummary}`)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="block w-full text-center bg-[#25D366] hover:bg-[#20bd5a] text-white py-2 px-3 rounded text-xs font-bold transition flex items-center justify-center gap-2"
+                                              >
+                                                Encaminhar para {member.name.split(' ')[0]} <ExternalLink className="w-3 h-3" />
+                                              </a>
+                                           ))}
+                                        </div>
+                                     ) : (
+                                        <p className="text-xs text-red-400 italic">
+                                           Nenhum telefone configurado na equipe. Vá em Configurações > Equipe.
+                                        </p>
+                                     )}
+                                  </div>
                                </div>
                              ) : (
                                <div className="text-center text-gray-400 py-10">
