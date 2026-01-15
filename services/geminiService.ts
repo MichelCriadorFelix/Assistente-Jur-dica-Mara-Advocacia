@@ -158,7 +158,7 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.8, // Mais alta para naturalidade e "ginga" humana
+            temperature: 0.5, // Reduzido para aumentar objetividade e evitar alucinações longas
           },
           history: recentHistory
         });
@@ -211,7 +211,7 @@ export const sendMessageToGemini = async (
   }
 
   console.error("Todas as tentativas falharam.", lastError);
-  return "Desculpe, o sistema do escritório está momentaneamente fora do ar. Poderia me enviar novamente sua mensagem em instantes?";
+  return "Desculpe, o sinal falhou. Pode enviar novamente?";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {

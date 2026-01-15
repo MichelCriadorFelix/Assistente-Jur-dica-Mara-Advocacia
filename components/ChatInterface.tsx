@@ -35,14 +35,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Boas-vindas Especialista Previdenciário
-           const isReturning = details?.clientType === 'returning' || (details?.caseStatus && details.caseStatus.length > 5);
-           
+           // Boas-vindas Simplificada e Objetiva
            let welcomeText = '';
+           
+           // Se já tem nome, pergunta o problema. Se não tem, pergunta o nome.
            if (details?.name && details.name !== 'Novo Cliente' && details.name !== 'User') {
-              welcomeText = `Olá, ${details.name}. Sou a assistente virtual do Dr. Michel Felix. Estamos à disposição.\n\nVocê tem alguma dúvida sobre o andamento do seu processo ou gostaria de tratar de um novo benefício?`;
+              welcomeText = `Olá, ${details.name}. Sou a Mara, assistente do Dr. Michel.\n\nComo podemos te ajudar hoje?`;
            } else {
-              welcomeText = `Olá! Seja bem-vindo(a) ao atendimento digital do **Dr. Michel Felix**, especialista em Direito Previdenciário (INSS).\n\nSou a assistente virtual e estou aqui para fazer sua triagem inicial.\n\nVocê busca informações sobre Aposentadoria, Auxílio-Doença, LOAS/BPC ou outro benefício? Pode me contar por áudio se preferir. 🎙️`;
+              welcomeText = `Olá! Sou a Mara, assistente virtual do escritório do Dr. Michel Felix.\n\nPara começar, qual é o seu nome?`;
            }
 
            const initialMsg: Message = {
@@ -166,7 +166,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       const errorMsg: Message = {
         id: Date.now().toString(),
         role: 'model',
-        content: "Desculpe, tive uma pequena falha de conexão. Pode repetir?",
+        content: "O sinal oscilou um pouco. O senhor(a) pode repetir?",
         type: 'text',
         timestamp: new Date()
       };
@@ -196,7 +196,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
                {contactDetails?.name && contactDetails.name !== 'Novo Cliente' ? contactDetails.name : 'Assistente Dr. Michel Felix'}
             </h1>
             <span className="text-xs text-white/90 font-medium">
-              {contactDetails?.aiPaused ? '🔴 Dr. Michel Digitado...' : (isLoading ? 'Analisando caso...' : 'Online')}
+              {contactDetails?.aiPaused ? '🔴 Dr. Michel Digitado...' : (isLoading ? 'Digitando...' : 'Online')}
             </span>
           </div>
         </div>
