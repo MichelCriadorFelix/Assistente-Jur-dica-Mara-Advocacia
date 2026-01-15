@@ -8,8 +8,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      // INJEÇÃO BRUTA E EXPLÍCITA DAS CHAVES
-      // Isso garante que o Vite substitua "process.env.API_KEY_X" pelo valor real da Vercel
+      // INJEÇÃO BRUTA DAS CHAVES GEMINI
       'process.env.API_KEY_1': JSON.stringify(env.API_KEY_1 || ''),
       'process.env.API_KEY_2': JSON.stringify(env.API_KEY_2 || ''),
       'process.env.API_KEY_3': JSON.stringify(env.API_KEY_3 || ''),
@@ -21,9 +20,13 @@ export default defineConfig(({ mode }) => {
       'process.env.API_KEY_9': JSON.stringify(env.API_KEY_9 || ''),
       'process.env.API_KEY_10': JSON.stringify(env.API_KEY_10 || ''),
       
-      // Fallback para chaves antigas ou com prefixo VITE
+      // INJEÇÃO BRUTA DO SUPABASE (Garante que conecta independente do nome da var na Vercel)
+      'process.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || env.SUPABASE_URL || ''),
+      'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || ''),
+
+      // Fallback geral
       'process.env': JSON.stringify({
-        ...env, // Tenta passar tudo que for possível
+        ...env,
         NODE_ENV: mode
       }),
     },
