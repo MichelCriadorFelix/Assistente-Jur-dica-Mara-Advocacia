@@ -59,14 +59,14 @@ export const getAvailableApiKeys = (): string[] => {
 
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
-  description: 'Gera o relatório de triagem PREVIDENCIÁRIA quando tiver informações suficientes.',
+  description: 'Gera o relatório final para o Dr. Michel (Jurídico) e notifica a Fabrícia (Administrativo) para iniciar a papelada.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       clientName: { type: Type.STRING },
       benefitType: { type: Type.STRING },
-      summary: { type: Type.STRING },
-      missingDocs: { type: Type.STRING },
+      summary: { type: Type.STRING, description: "Resumo do caso + Status do Gov.br" },
+      missingDocs: { type: Type.STRING, description: "Lista de documentos que o cliente confirmou ou negou ter." },
       urgency: { type: Type.STRING, enum: ["ALTA", "MEDIA", "BAIXA"] },
       analysis: { type: Type.STRING }
     },
@@ -186,13 +186,13 @@ export const sendMessageToGemini = async (
                   name: call.name, 
                   args: {
                     ...call.args,
-                    legalSummary: call.args.summary, 
+                    legalSummary: `${call.args.summary} | Docs Confirmados: ${call.args.missingDocs}`, 
                     area: 'PREVIDENCIÁRIO',
                     priority: call.args.urgency
                   } 
                 });
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório Salvo." } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório Enviado para Dr. Michel e Fabrícia." } } }]
                 });
                 responseText = toolResp.text;
              }
