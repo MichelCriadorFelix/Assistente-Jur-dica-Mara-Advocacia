@@ -59,22 +59,20 @@ export const getAvailableApiKeys = (): string[] => {
 
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
-  description: 'Gera o relatório final de triagem para o Dr. Michel e Fabrícia após entender o caso e solicitar Gov.br.',
+  description: 'Gera o Relatório Técnico Previdenciário detalhado para o Dr. Michel e Fabrícia.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       clientName: { type: Type.STRING },
-      processStage: { 
-        type: Type.STRING, 
-        enum: ["ADMINISTRATIVO", "JUDICIAL", "CONSULTORIA/PLANEJAMENTO", "INCERTO"],
-        description: "Administrativo (vai dar entrada) ou Judicial (já foi negado/cortado)."
-      },
-      summary: { type: Type.STRING, description: "História do cliente detalhada." },
-      hasGovBr: { type: Type.BOOLEAN, description: "Se o cliente confirmou ter ou saber recuperar a senha Gov.br" },
-      missingDocs: { type: Type.STRING, description: "Documentos que faltam." },
+      clientAge: { type: Type.STRING, description: "Idade informada" },
+      workStatus: { type: Type.STRING, description: "Trabalhando (CLT), Carnê ou Desempregado?" },
+      timeSinceLastContribution: { type: Type.STRING, description: "Tempo sem pagar (para cálculo de Periodo de Graça)" },
+      estimatedContributionTime: { type: Type.STRING, description: "Tempo total estimado pelo cliente" },
+      govBrCredentials: { type: Type.STRING, description: "CPF e Senha (se fornecidos) ou 'PRECISA RECUPERAR SENHA'" },
+      summary: { type: Type.STRING, description: "Resumo narrativo do problema" },
       urgency: { type: Type.STRING, enum: ["ALTA", "MEDIA", "BAIXA"] },
     },
-    required: ['clientName', 'processStage', 'summary', 'urgency', 'hasGovBr'],
+    required: ['clientName', 'summary', 'urgency', 'govBrCredentials', 'workStatus'],
   },
 };
 
@@ -124,7 +122,7 @@ export const sendMessageToGemini = async (
   }
 
   if (contactContext?.legalSummary) {
-    finalPrompt += `\n\n### O QUE JÁ SABEMOS DESTE CASO:\n"${contactContext.legalSummary}"\n(Continue a investigação a partir daqui)`;
+    finalPrompt += `\n\n### O QUE JÁ SABEMOS DESTE CASO (EM ANDAMENTO):\n"${contactContext.legalSummary}"\n(Continue a investigação a partir daqui, não pergunte o que já sabe.)`;
   }
   
   if (contactContext?.caseStatus) {
@@ -165,7 +163,7 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.4, 
+            temperature: 0.3, // Temperatura mais baixa para ser mais fiel ao roteiro técnico
           },
           history: recentHistory
         });
@@ -185,22 +183,32 @@ export const sendMessageToGemini = async (
                 const toolResp = await chat.sendMessage({
                   message: [{ functionResponse: { name: call.name, response: { result: "Aprendido e salvo com sucesso." } } }]
                 });
-                responseText = toolResp.text; // A IA deve confirmar sutilmente que entendeu
+                responseText = toolResp.text;
              }
              else if (call.name === 'notificar_equipe' && onToolCall) {
-                const stage = call.args.processStage || 'INCERTO';
-                const hasGov = call.args.hasGovBr ? 'COM ACESSO' : 'SEM ACESSO';
+                // Formata o resumo jurídico rico para salvar no banco
+                const args = call.args;
+                const richSummary = `
+                  [RELATÓRIO TRIAGEM]
+                  - Idade: ${args.clientAge || '?'}
+                  - Status: ${args.workStatus || '?'}
+                  - Tempo Contrib.: ~${args.estimatedContributionTime || '?'}
+                  - Pausa: ${args.timeSinceLastContribution || 'N/A'}
+                  - Gov.br: ${args.govBrCredentials || 'PENDENTE'}
+                  - Resumo: ${args.summary}
+                `.trim();
+
                 onToolCall({ 
                   name: call.name, 
                   args: {
                     ...call.args,
-                    legalSummary: `[${stage}] ${call.args.summary} | Gov.br: ${hasGov}`, 
+                    legalSummary: richSummary, 
                     area: 'PREVIDENCIÁRIO',
                     priority: call.args.urgency
                   } 
                 });
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório Salvo. Encerre o atendimento educadamente." } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório Detalhado enviado com Sucesso para Dr. Michel." } } }]
                 });
                 responseText = toolResp.text;
              }
