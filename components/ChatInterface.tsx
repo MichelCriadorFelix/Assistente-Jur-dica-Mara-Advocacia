@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2, Trash2, Paperclip, FileText, X, Lock } from 'lucide-react';
+import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2, Trash2, Paperclip, FileText, X, Lock, CheckCircle } from 'lucide-react';
 import AudioRecorder from './AudioRecorder';
 import { Message, AppConfig, Contact } from '../types';
 import { sendMessageToGemini } from '../services/geminiService';
@@ -189,7 +189,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
 
              const { clientName, legalSummary } = toolCall.args;
              
-             // 1. Atualiza Status
+             // 1. Atualiza Status para TRIAGED (Concluído)
              await chatService.updateContactStatus(contactId, 'triaged', clientName, legalSummary);
              setContactDetails(prev => prev ? ({ ...prev, name: clientName, status: 'triaged' }) : null);
 
@@ -198,7 +198,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
                id: Date.now().toString() + '-report',
                role: 'system',
                // Adicionando cabeçalho explícito
-               content: `🔒 **SISTEMA (Visível apenas para Admin):**\n📄 **RELATÓRIO ENVIADO**\n\n**Para:** Dr. Michel, Fabrícia\n**Cliente:** ${clientName}\n\n${legalSummary}`,
+               content: `🔒 **SISTEMA (Visível apenas para Admin):**\n✅ **ATENDIMENTO CONCLUÍDO**\n\n**Para:** Dr. Michel, Fabrícia\n**Cliente:** ${clientName}\n\n${legalSummary}`,
                type: 'text',
                timestamp: new Date()
              };
@@ -281,6 +281,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
           )}
         </div>
       </div>
+
+      {/* STATUS BANNER - VISUALIZAÇÃO DE CONCLUÍDO */}
+      {contactDetails?.status === 'triaged' && (
+         <div className="bg-emerald-100 border-b border-emerald-200 text-emerald-800 text-xs font-bold py-2 text-center flex items-center justify-center gap-2 z-20 animate-in slide-in-from-top">
+            <CheckCircle className="w-4 h-4" />
+            TRIAGEM FINALIZADA - Status definido como "Concluído"
+         </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3 pb-20 scroll-smooth">
         {messages.map((msg) => {

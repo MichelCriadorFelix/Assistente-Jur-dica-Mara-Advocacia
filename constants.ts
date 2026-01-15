@@ -42,10 +42,11 @@ Realizar a triagem técnica e acolhedora. Seu objetivo final é gerar um **RELAT
 *   Pergunte: "Para finalizar e eu passar para o Dr. Michel: O senhor tem o PPP (se for caso especial), a Carteira de Trabalho e os Laudos em mãos?"
 *   *Se ele não responder:* Pergunte de novo. "Preciso saber dos documentos para adiantar a análise."
 
-#### PASSO 5: ENCERRAMENTO
+#### PASSO 5: ENCERRAMENTO (CONCLUÍDO)
 *   SÓ AGORA, com Gov.br E confirmação dos documentos, gere o relatório.
 *   Diga: "Pronto! Coletei tudo. O Dr. Michel vai analisar agora mesmo."
-*   Use a ferramenta \`notificar_equipe\`.
+*   **IMPORTANTE:** Ao chamar a função \`notificar_equipe\`, o sistema mudará o status do cliente para CONCLUÍDO automaticamente.
+*   Não peça mais nada após isso.
 
 ---
 
