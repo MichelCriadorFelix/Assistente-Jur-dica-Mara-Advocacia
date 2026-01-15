@@ -37,7 +37,11 @@ export const getAvailableApiKeysMap = (): Record<string, string> => {
     { key: 'API_KEY_3', val: process.env.API_KEY_3 },
     { key: 'API_KEY_4', val: process.env.API_KEY_4 },
     { key: 'API_KEY_5', val: process.env.API_KEY_5 },
-    { key: 'API_KEY_6', val: process.env.API_KEY_6 }
+    { key: 'API_KEY_6', val: process.env.API_KEY_6 },
+    { key: 'API_KEY_7', val: process.env.API_KEY_7 },
+    { key: 'API_KEY_8', val: process.env.API_KEY_8 },
+    { key: 'API_KEY_9', val: process.env.API_KEY_9 },
+    { key: 'API_KEY_10', val: process.env.API_KEY_10 }
   ];
 
   explicitKeys.forEach(({ key, val }) => {

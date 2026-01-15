@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => {
       'process.env.API_KEY_5': JSON.stringify(env.API_KEY_5 || ''),
       'process.env.API_KEY_6': JSON.stringify(env.API_KEY_6 || ''),
       'process.env.API_KEY_7': JSON.stringify(env.API_KEY_7 || ''),
+      'process.env.API_KEY_8': JSON.stringify(env.API_KEY_8 || ''),
+      'process.env.API_KEY_9': JSON.stringify(env.API_KEY_9 || ''),
+      'process.env.API_KEY_10': JSON.stringify(env.API_KEY_10 || ''),
       
       // Fallback para chaves antigas ou com prefixo VITE
       'process.env': JSON.stringify({
