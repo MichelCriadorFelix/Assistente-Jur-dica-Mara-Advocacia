@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2, Trash2, Paperclip, FileText, X } from 'lucide-react';
+import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2, Trash2, Paperclip, FileText, X, Lock } from 'lucide-react';
 import AudioRecorder from './AudioRecorder';
 import { Message, AppConfig, Contact } from '../types';
 import { sendMessageToGemini } from '../services/geminiService';
@@ -23,6 +23,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Ref para evitar duplicação do relatório
+  const lastReportRef = useRef<number>(0);
 
   useEffect(() => {
     const initSession = async () => {
@@ -179,6 +182,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         config.systemPrompt,
         async (toolCall) => {
           if (toolCall.name === 'notificar_equipe') {
+             // Debounce para evitar relatório duplicado em curto espaço de tempo (5 segundos)
+             const now = Date.now();
+             if (now - lastReportRef.current < 5000) return;
+             lastReportRef.current = now;
+
              const { clientName, legalSummary } = toolCall.args;
              
              // 1. Atualiza Status
@@ -189,7 +197,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
              const reportMsg: Message = {
                id: Date.now().toString() + '-report',
                role: 'system',
-               content: `📄 **RELATÓRIO ENVIADO PARA EQUIPE**\n\n**Para:** Dr. Michel, Fabrícia\n**Cliente:** ${clientName}\n\n${legalSummary}`,
+               // Adicionando cabeçalho explícito
+               content: `🔒 **SISTEMA (Visível apenas para Admin):**\n📄 **RELATÓRIO ENVIADO**\n\n**Para:** Dr. Michel, Fabrícia\n**Cliente:** ${clientName}\n\n${legalSummary}`,
                type: 'text',
                timestamp: new Date()
              };
@@ -200,16 +209,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         freshDetails 
       );
 
-      const botMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'model',
-        content: responseText,
-        type: 'text',
-        timestamp: new Date()
-      };
+      // Algumas vezes o gemini manda texto vazio se só chamou a tool, filtramos aqui
+      if (responseText && responseText.trim().length > 0) {
+        const botMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'model',
+          content: responseText,
+          type: 'text',
+          timestamp: new Date()
+        };
 
-      setMessages(prev => [...prev, botMsg]);
-      await chatService.saveMessage(contactId, botMsg);
+        setMessages(prev => [...prev, botMsg]);
+        await chatService.saveMessage(contactId, botMsg);
+      }
 
     } catch (error) {
       console.error(error);
@@ -279,8 +291,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
              return (
                <div key={msg.id} className="flex justify-center my-4 animate-in fade-in zoom-in duration-300">
                   <div className="bg-yellow-50 border border-yellow-200 text-gray-700 p-4 rounded-lg shadow-sm max-w-sm text-xs font-mono whitespace-pre-wrap relative">
-                     <div className="absolute -top-3 -left-3 bg-white p-1 rounded-full border border-yellow-200">
-                        <FileText className="w-5 h-5 text-yellow-600" />
+                     <div className="absolute -top-3 -left-3 bg-white p-1 rounded-full border border-yellow-200 shadow-sm" title="Invisível para o cliente">
+                        <Lock className="w-4 h-4 text-yellow-600" />
                      </div>
                      {msg.content}
                   </div>

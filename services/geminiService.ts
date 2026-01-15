@@ -69,10 +69,11 @@ const notifyTeamFunction: FunctionDeclaration = {
       timeSinceLastContribution: { type: Type.STRING, description: "Tempo sem pagar (para cálculo de Periodo de Graça)" },
       estimatedContributionTime: { type: Type.STRING, description: "Tempo total estimado pelo cliente" },
       govBrCredentials: { type: Type.STRING, description: "CPF e Senha (se fornecidos) ou 'PRECISA RECUPERAR SENHA'" },
+      documentsStatus: { type: Type.STRING, description: "Quais documentos o cliente confirmou ter (PPP, Laudos, Carteira)? Se não sabe, PERGUNTE ANTES de chamar esta função." },
       summary: { type: Type.STRING, description: "Resumo narrativo do problema" },
       urgency: { type: Type.STRING, enum: ["ALTA", "MEDIA", "BAIXA"] },
     },
-    required: ['clientName', 'summary', 'urgency', 'govBrCredentials', 'workStatus'],
+    required: ['clientName', 'summary', 'urgency', 'govBrCredentials', 'workStatus', 'documentsStatus'],
   },
 };
 
@@ -214,6 +215,7 @@ export const sendMessageToGemini = async (
 - Tempo Contrib.: ~${args.estimatedContributionTime || '?'}
 - Pausa: ${args.timeSinceLastContribution || 'N/A'}
 - Gov.br: ${args.govBrCredentials || 'PENDENTE'}
+- Docs: ${args.documentsStatus || 'PENDENTE'}
 - Resumo: ${args.summary}
                 `.trim();
 
@@ -226,8 +228,10 @@ export const sendMessageToGemini = async (
                     priority: call.args.urgency
                   } 
                 });
+                
+                // Resposta final do bot após gerar o relatório
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório gerado e enviado com sucesso para a equipe." } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório salvo com sucesso." } } }]
                 });
                 responseText = toolResp.text;
              }
@@ -245,7 +249,7 @@ export const sendMessageToGemini = async (
   }
 
   console.error("Todas as tentativas falharam.", lastError);
-  return "Desculpe, não consegui abrir o arquivo ou processar a mensagem. Podemos tentar de novo?";
+  return "Desculpe, não consegui processar a mensagem no momento.";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
