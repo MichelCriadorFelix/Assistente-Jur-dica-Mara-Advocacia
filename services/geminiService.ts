@@ -3,11 +3,12 @@ import { Message, TeamMember, Contact } from "../types";
 import { DEFAULT_TEAM } from "../constants";
 import { learningService } from "./learningService";
 
-// LISTA DE MODELOS ATUALIZADA - GEMINI 3 SERIES
+// LISTA DE MODELOS ATUALIZADA - PRIORIDADE PARA FLASH (ALTA DISPONIBILIDADE)
 const MODEL_CANDIDATES = [
-  'gemini-3-flash-preview',    // Padrão para chat rápido e inteligente
-  'gemini-3-pro-preview',      // Raciocínio complexo se o flash falhar
-  'gemini-2.0-flash-exp'       // Fallback legado
+  'gemini-2.0-flash',          // Prioridade 1: Estável, Rápido e Cota Alta
+  'gemini-2.0-flash-exp',      // Prioridade 2: Experimental (ótimo para fallback)
+  'gemini-3-flash-preview',    // Prioridade 3: Nova geração (se disponível)
+  'gemini-3-pro-preview'       // Prioridade 4: Raciocínio complexo (mais lento/limitado)
 ];
 
 const cleanKey = (key: string | undefined): string => {
@@ -114,6 +115,8 @@ export const sendMessageToGemini = async (
   
   let apiKeys = getAvailableApiKeys();
   if (apiKeys.length === 0) return "⚠️ Erro de Sistema: Nenhuma chave de API configurada. Contate o administrador.";
+  
+  // Embaralha as chaves para distribuir a carga
   apiKeys = shuffleArray(apiKeys);
 
   const memories = await learningService.getAllMemories();
@@ -142,7 +145,6 @@ export const sendMessageToGemini = async (
 
   // Prepara histórico (limita para manter foco)
   const recentHistory = history.slice(-20).map(m => {
-    // Se a mensagem histórica tinha arquivo, indicamos isso no texto pois o histórico simples do Gemini SDK não suporta reenvio de blobs antigos facilmente sem cache
     let content = m.content;
     if (m.type === 'file') content = `[USUÁRIO ENVIOU ARQUIVO: ${m.fileName}] ${m.content}`;
     if (m.type === 'audio') content = `[USUÁRIO ENVIOU ÁUDIO]`;
@@ -178,9 +180,11 @@ export const sendMessageToGemini = async (
 
   let lastError = null;
 
+  // TENTA CADA CHAVE
   for (const apiKey of apiKeys) {
     const ai = new GoogleGenAI({ apiKey });
 
+    // TENTA CADA MODELO (Do mais rápido para o mais potente)
     for (const modelName of MODEL_CANDIDATES) {
       try {
         const chat = ai.chats.create({
@@ -188,18 +192,20 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.3,
+            temperature: 0.3, // Mais foco, menos alucinação
           },
           history: recentHistory
         });
 
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 25000)); // Mais tempo para imagens/PDF
+        // Aumentei o timeout para evitar erro em conexões lentas ou processamento de arquivos grandes
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 30000));
         const apiPromise = chat.sendMessage({ message: currentParts });
         
         const result: any = await Promise.race([apiPromise, timeoutPromise]);
         
         let responseText = result.text || "";
 
+        // Processamento de Tools
         if (result.functionCalls && result.functionCalls.length > 0) {
            for (const call of result.functionCalls) {
              if (call.name === 'save_knowledge') {
@@ -242,18 +248,21 @@ export const sendMessageToGemini = async (
            }
         }
 
+        // Se conseguiu uma resposta válida, retorna imediatamente
         if (responseText) return responseText;
 
       } catch (e: any) {
-        console.warn(`Falha no modelo ${modelName}:`, e.message);
+        // Se for erro de cota (429), apenas loga e tenta o próximo modelo/chave
+        console.warn(`Tentativa falhou no modelo ${modelName} com chave ending in ...${apiKey.slice(-4)}:`, e.message);
         lastError = e;
-        if (e.message?.includes('429')) break; 
+        
+        // Se o erro NÃO for 429 ou 503 (Serviço indisponível), talvez seja erro de lógica, mas vamos continuar tentando
       }
     }
   }
 
   console.error("Todas as tentativas falharam.", lastError);
-  return "Desculpe, não consegui processar a mensagem no momento.";
+  return "Desculpe, não consegui processar a mensagem no momento. (Erro de conexão com IA)";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
@@ -262,11 +271,12 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
 
   try {
     const ai = new GoogleGenAI({ apiKey: keys[0] });
+    // Teste com o modelo mais leve
     await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash', 
       contents: "Ping",
     });
-    return { success: true, message: "Conexão Gemini 3 Estabelecida!" };
+    return { success: true, message: "Conexão Gemini 2.0 Flash Estabelecida!" };
   } catch (e: any) {
     return { success: false, message: e.message };
   }
