@@ -38,11 +38,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
            // Boas-vindas Simplificada e Objetiva
            let welcomeText = '';
            
-           // Se já tem nome, pergunta o problema. Se não tem, pergunta o nome.
+           // Lógica de "Contato Salvo" vs "Desconhecido"
            if (details?.name && details.name !== 'Novo Cliente' && details.name !== 'User') {
-              welcomeText = `Olá, ${details.name}. Sou a Mara, assistente do Dr. Michel.\n\nComo podemos te ajudar hoje?`;
+              // Cliente Salvo (Já sabemos o nome)
+              welcomeText = `Olá, ${details.name}! Aqui é a Mara, do escritório do Dr. Michel.\n\nO que aconteceu? Como posso ajudar?`;
            } else {
-              welcomeText = `Olá! Sou a Mara, assistente virtual do escritório do Dr. Michel Felix.\n\nPara começar, qual é o seu nome?`;
+              // Cliente Novo (Só temos o número)
+              welcomeText = `Olá! Sou a Mara, assistente do Dr. Michel Felix.\n\nPara começar, qual é o seu nome?`;
            }
 
            const initialMsg: Message = {
@@ -147,7 +149,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
              setContactDetails(prev => prev ? ({ ...prev, name: clientName, status: 'triaged' }) : null);
           }
         },
-        freshDetails // Passa o contexto completo (incluindo resumo anterior e status processual)
+        freshDetails // Passa o contexto completo (incluindo nome atualizado)
       );
 
       const botMsg: Message = {

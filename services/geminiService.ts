@@ -108,20 +108,23 @@ export const sendMessageToGemini = async (
 
   let finalPrompt = systemInstruction;
 
-  // Contexto Dinâmico
-  const clientType = contactContext?.clientType === 'returning' ? 'CLIENTE DA CARTEIRA (JÁ É CLIENTE)' : 'POSSÍVEL NOVO CLIENTE';
-  finalPrompt += `\n\n### CONTEXTO ATUAL:\nStatus: **${clientType}**`;
+  // Contexto Dinâmico de Identificação
+  const clientName = (contactContext?.name && contactContext.name !== 'Novo Cliente' && contactContext.name !== 'User') 
+    ? contactContext.name 
+    : "DESCONHECIDO (Novo Cliente)";
+
+  finalPrompt += `\n\n### DADOS DO CONTATO (WHATSAPP):\nNome Identificado: **"${clientName}"**\n(Se for DESCONHECIDO, pergunte o nome. Se tiver nome, use-o e pule essa etapa.)`;
 
   if (knowledgeBase) {
     finalPrompt += `\n\n### REGRAS INTERNAS APRENDIDAS:\n${knowledgeBase}`;
   }
 
   if (contactContext?.legalSummary) {
-    finalPrompt += `\n\n### O QUE JÁ SABEMOS DESTE CASO:\n"${contactContext.legalSummary}"\n(Use isso para mostrar que você tem memória)`;
+    finalPrompt += `\n\n### O QUE JÁ SABEMOS DESTE CASO:\n"${contactContext.legalSummary}"`;
   }
   
   if (contactContext?.caseStatus) {
-    finalPrompt += `\n\n### STATUS DO PROCESSO (RESPONDER SE PERGUNTADO):\n"${contactContext.caseStatus}"`;
+    finalPrompt += `\n\n### STATUS DO PROCESSO (PRONTUÁRIO):\n"${contactContext.caseStatus}"`;
   }
 
   // Prepara histórico (limita para manter foco)
@@ -158,7 +161,7 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.5, // Reduzido para aumentar objetividade e evitar alucinações longas
+            temperature: 0.4, // Baixa temperatura para seguir o roteiro rigorosamente
           },
           history: recentHistory
         });
@@ -175,7 +178,6 @@ export const sendMessageToGemini = async (
            for (const call of result.functionCalls) {
              if (call.name === 'save_knowledge') {
                 await learningService.addMemory(call.args.fact, call.args.category);
-                // Resposta invisível para confirmar ação
                 const toolResp = await chat.sendMessage({
                   message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
                 });
@@ -204,7 +206,6 @@ export const sendMessageToGemini = async (
       } catch (e: any) {
         console.warn(`Falha no modelo ${modelName}:`, e.message);
         lastError = e;
-        // Se for erro de cota (429), tenta próxima chave. Se for outro, tenta próximo modelo.
         if (e.message?.includes('429')) break; 
       }
     }
@@ -220,7 +221,6 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
 
   try {
     const ai = new GoogleGenAI({ apiKey: keys[0] });
-    // Teste com Gemini 3 Flash para garantir compatibilidade
     await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: "Ping",
