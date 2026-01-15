@@ -59,28 +59,32 @@ export const getAvailableApiKeys = (): string[] => {
 
 const notifyTeamFunction: FunctionDeclaration = {
   name: 'notificar_equipe',
-  description: 'Gera o relatório final para o Dr. Michel (Jurídico) e notifica a Fabrícia (Administrativo) para iniciar a papelada.',
+  description: 'Gera o relatório final de triagem para o Dr. Michel e Fabrícia após entender o caso e solicitar Gov.br.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       clientName: { type: Type.STRING },
-      benefitType: { type: Type.STRING },
-      summary: { type: Type.STRING, description: "Resumo do caso + Status do Gov.br" },
-      missingDocs: { type: Type.STRING, description: "Lista de documentos que o cliente confirmou ou negou ter." },
+      processStage: { 
+        type: Type.STRING, 
+        enum: ["ADMINISTRATIVO", "JUDICIAL", "CONSULTORIA/PLANEJAMENTO", "INCERTO"],
+        description: "Administrativo (vai dar entrada) ou Judicial (já foi negado/cortado)."
+      },
+      summary: { type: Type.STRING, description: "História do cliente detalhada." },
+      hasGovBr: { type: Type.BOOLEAN, description: "Se o cliente confirmou ter ou saber recuperar a senha Gov.br" },
+      missingDocs: { type: Type.STRING, description: "Documentos que faltam." },
       urgency: { type: Type.STRING, enum: ["ALTA", "MEDIA", "BAIXA"] },
-      analysis: { type: Type.STRING }
     },
-    required: ['clientName', 'benefitType', 'summary', 'urgency'],
+    required: ['clientName', 'processStage', 'summary', 'urgency', 'hasGovBr'],
   },
 };
 
 const saveKnowledgeFunction: FunctionDeclaration = {
   name: 'save_knowledge',
-  description: 'Memoriza uma nova regra ou preferência.',
+  description: 'Memoriza uma nova regra, correção do usuário ou preferência ensinada durante o chat.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      fact: { type: Type.STRING },
+      fact: { type: Type.STRING, description: "O que foi aprendido." },
       category: { type: Type.STRING, enum: ["preference", "legal_rule", "correction", "vocabulary"] }
     },
     required: ['fact', 'category'],
@@ -116,11 +120,11 @@ export const sendMessageToGemini = async (
   finalPrompt += `\n\n### DADOS DO CONTATO (WHATSAPP):\nNome Identificado: **"${clientName}"**\n(Se for DESCONHECIDO, pergunte o nome. Se tiver nome, use-o e pule essa etapa.)`;
 
   if (knowledgeBase) {
-    finalPrompt += `\n\n### REGRAS INTERNAS APRENDIDAS:\n${knowledgeBase}`;
+    finalPrompt += `\n\n### APRENDIZADO CONTÍNUO (REGRAS APRENDIDAS):\n${knowledgeBase}\n(Use isso para não cometer os mesmos erros).`;
   }
 
   if (contactContext?.legalSummary) {
-    finalPrompt += `\n\n### O QUE JÁ SABEMOS DESTE CASO:\n"${contactContext.legalSummary}"`;
+    finalPrompt += `\n\n### O QUE JÁ SABEMOS DESTE CASO:\n"${contactContext.legalSummary}"\n(Continue a investigação a partir daqui)`;
   }
   
   if (contactContext?.caseStatus) {
@@ -161,7 +165,7 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.4, // Baixa temperatura para seguir o roteiro rigorosamente
+            temperature: 0.4, 
           },
           history: recentHistory
         });
@@ -179,22 +183,24 @@ export const sendMessageToGemini = async (
              if (call.name === 'save_knowledge') {
                 await learningService.addMemory(call.args.fact, call.args.category);
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "OK" } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Aprendido e salvo com sucesso." } } }]
                 });
-                responseText = toolResp.text;
+                responseText = toolResp.text; // A IA deve confirmar sutilmente que entendeu
              }
              else if (call.name === 'notificar_equipe' && onToolCall) {
+                const stage = call.args.processStage || 'INCERTO';
+                const hasGov = call.args.hasGovBr ? 'COM ACESSO' : 'SEM ACESSO';
                 onToolCall({ 
                   name: call.name, 
                   args: {
                     ...call.args,
-                    legalSummary: `${call.args.summary} | Docs Confirmados: ${call.args.missingDocs}`, 
+                    legalSummary: `[${stage}] ${call.args.summary} | Gov.br: ${hasGov}`, 
                     area: 'PREVIDENCIÁRIO',
                     priority: call.args.urgency
                   } 
                 });
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório Enviado para Dr. Michel e Fabrícia." } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório Salvo. Encerre o atendimento educadamente." } } }]
                 });
                 responseText = toolResp.text;
              }
