@@ -450,7 +450,7 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                                         </div>
                                      ) : (
                                         <p className="text-xs text-red-400 italic">
-                                           Nenhum telefone configurado na equipe. Vá em Configurações > Equipe.
+                                           Nenhum telefone configurado na equipe. Vá em Configurações &gt; Equipe.
                                         </p>
                                      )}
                                   </div>
