@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2, Trash2 } from 'lucide-react';
+import { Send, MoreVertical, Phone, Video, ArrowLeft, Loader2, Trash2, Paperclip, FileText, X } from 'lucide-react';
 import AudioRecorder from './AudioRecorder';
 import { Message, AppConfig, Contact } from '../types';
 import { sendMessageToGemini } from '../services/geminiService';
@@ -18,6 +18,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   const [contactDetails, setContactDetails] = useState<Contact | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   
+  // File Upload State
+  const [selectedFile, setSelectedFile] = useState<{ blob: Blob, name: string, type: string, previewUrl?: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,15 +39,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-           // Boas-vindas Simplificada e Estratégica
            let welcomeText = '';
-           
-           // Lógica de "Contato Salvo" vs "Desconhecido"
            if (details?.name && details.name !== 'Novo Cliente' && details.name !== 'User') {
-              // Cliente Salvo (Já sabemos o nome) -> Abordagem de Retorno
               welcomeText = `Bom falar com você novamente, ${details.name}!\n\nO senhor pode resumir o seu caso? Pode ser por escrito ou por áudio, como preferir.`;
            } else {
-              // Cliente Novo (Só temos o número) -> Abordagem Inicial
               welcomeText = `Olá! Sou a Mara, assistente do Dr. Michel Felix.\n\nPara começar, qual é o seu nome?`;
            }
 
@@ -80,7 +79,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, selectedFile]);
 
   const handleResetConversation = () => {
     if (confirm("Deseja iniciar um novo atendimento?")) {
@@ -90,26 +89,63 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
     setShowMenu(false);
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const isImage = file.type.startsWith('image/');
+      setSelectedFile({
+        blob: file,
+        name: file.name,
+        type: file.type,
+        previewUrl: isImage ? URL.createObjectURL(file) : undefined
+      });
+    }
+  };
+
+  const clearFile = () => {
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setSelectedFile(null);
+  };
+
   const handleSendMessage = async (text?: string, audioBlob?: Blob, mimeType?: string) => {
-    if ((!text && !audioBlob) || !contactId || isLoading) return;
+    if ((!text && !audioBlob && !selectedFile) || !contactId || isLoading) return;
+
+    let mediaUrl: string | undefined = undefined;
+    let finalType: Message['type'] = 'text';
+    let fileName: string | undefined = undefined;
+    let finalMime = 'text/plain';
+
+    if (audioBlob) {
+      finalType = 'audio';
+      mediaUrl = URL.createObjectURL(audioBlob);
+      finalMime = mimeType || 'audio/webm';
+    } else if (selectedFile) {
+      finalType = 'file';
+      mediaUrl = URL.createObjectURL(selectedFile.blob);
+      fileName = selectedFile.name;
+      finalMime = selectedFile.type;
+    }
 
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: text || 'Áudio enviado',
-      type: audioBlob ? 'audio' : 'text',
+      content: text || (selectedFile ? `Arquivo: ${selectedFile.name}` : 'Áudio enviado'),
+      type: finalType,
       timestamp: new Date(),
-      audioUrl: audioBlob ? URL.createObjectURL(audioBlob) : undefined
+      audioUrl: finalType === 'audio' ? mediaUrl : undefined,
+      fileUrl: finalType === 'file' ? mediaUrl : undefined,
+      fileName: fileName,
+      mimeType: finalMime
     };
 
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
+    const fileToSend = selectedFile; 
+    clearFile(); // Limpa UI
     setIsLoading(true);
 
     try {
       await chatService.saveMessage(contactId, userMsg);
-
-      // Atualiza contexto para garantir que a IA tenha os dados mais recentes do banco
       const freshDetails = await chatService.getContactDetails(contactId);
       setContactDetails(freshDetails);
 
@@ -118,38 +154,50 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         return; 
       }
 
-      let audioBase64: string | undefined;
-      let cleanMime = 'audio/webm';
+      let mediaBase64: string | undefined;
 
+      // Process Audio or File
       if (audioBlob) {
-        if (mimeType) cleanMime = mimeType.split(';')[0].trim();
-        audioBase64 = await new Promise((resolve) => {
+        mediaBase64 = await new Promise((resolve) => {
           const reader = new FileReader();
           reader.readAsDataURL(audioBlob);
-          reader.onloadend = () => {
-             const base64 = reader.result as string;
-             resolve(base64.split(',')[1]); 
-          };
+          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+        });
+      } else if (fileToSend) {
+        mediaBase64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(fileToSend.blob);
+          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
         });
       }
 
-      // Filtra mensagens de sistema puras
       const historyForAI = messages.filter(m => m.id !== 'init-welcome');
 
       const responseText = await sendMessageToGemini(
         historyForAI, 
-        { text, audioBase64, mimeType: cleanMime }, 
+        { text, mediaBase64, mimeType: finalMime }, 
         config.systemPrompt,
         async (toolCall) => {
           if (toolCall.name === 'notificar_equipe') {
-             const { clientName, priority, legalSummary } = toolCall.args;
-             // Atualiza status e salva o resumo jurídico gerado pela IA
+             const { clientName, legalSummary } = toolCall.args;
+             
+             // 1. Atualiza Status
              await chatService.updateContactStatus(contactId, 'triaged', clientName, legalSummary);
-             // Atualiza localmente para refletir nome
              setContactDetails(prev => prev ? ({ ...prev, name: clientName, status: 'triaged' }) : null);
+
+             // 2. Simula o Relatório no Chat para o Teste
+             const reportMsg: Message = {
+               id: Date.now().toString() + '-report',
+               role: 'system',
+               content: `📄 **RELATÓRIO ENVIADO PARA EQUIPE**\n\n**Para:** Dr. Michel, Fabrícia\n**Cliente:** ${clientName}\n\n${legalSummary}`,
+               type: 'text',
+               timestamp: new Date()
+             };
+             setMessages(prev => [...prev, reportMsg]);
+             await chatService.saveMessage(contactId, reportMsg);
           }
         },
-        freshDetails // Passa o contexto completo (incluindo nome atualizado)
+        freshDetails 
       );
 
       const botMsg: Message = {
@@ -225,6 +273,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
       <div className="flex-1 overflow-y-auto p-4 z-10 space-y-3 pb-20 scroll-smooth">
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
+          const isSystem = msg.role === 'system';
+          
+          if (isSystem) {
+             return (
+               <div key={msg.id} className="flex justify-center my-4 animate-in fade-in zoom-in duration-300">
+                  <div className="bg-yellow-50 border border-yellow-200 text-gray-700 p-4 rounded-lg shadow-sm max-w-sm text-xs font-mono whitespace-pre-wrap relative">
+                     <div className="absolute -top-3 -left-3 bg-white p-1 rounded-full border border-yellow-200">
+                        <FileText className="w-5 h-5 text-yellow-600" />
+                     </div>
+                     {msg.content}
+                  </div>
+               </div>
+             )
+          }
+
           return (
             <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
               <div 
@@ -232,14 +295,32 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
                   isUser ? 'bg-[#d9fdd3] rounded-tr-none text-gray-800' : 'bg-white rounded-tl-none text-gray-800'
                 }`}
               >
-                {msg.type === 'audio' && msg.audioUrl ? (
+                {/* Audio Bubble */}
+                {msg.type === 'audio' && msg.audioUrl && (
                   <div className="min-w-[200px] flex items-center gap-2">
                     <span className="text-xl">🎤</span>
                     <audio controls src={msg.audioUrl} className="h-8 w-48" />
                   </div>
-                ) : (
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                 )}
+                
+                {/* File Bubble */}
+                {msg.type === 'file' && (
+                  <div className="mb-2">
+                    {msg.mimeType?.startsWith('image') && msg.fileUrl ? (
+                      <img src={msg.fileUrl} alt="Anexo" className="max-w-[200px] max-h-[200px] rounded-lg border border-gray-200 my-1 object-cover" />
+                    ) : (
+                       <div className="flex items-center gap-2 bg-gray-100 p-2 rounded-lg border border-gray-200">
+                          <FileText className="w-8 h-8 text-red-500" />
+                          <div className="flex flex-col overflow-hidden">
+                             <span className="font-medium truncate max-w-[150px]">{msg.fileName || 'Documento'}</span>
+                             <span className="text-xs text-gray-500 uppercase">{msg.mimeType?.split('/')[1] || 'FILE'}</span>
+                          </div>
+                       </div>
+                    )}
+                  </div>
+                )}
+
+                <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                 <span className="text-[10px] text-gray-500 block text-right mt-1 opacity-70">
                   {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   {isUser && <span className="ml-1 text-blue-500 font-bold">✓✓</span>}
@@ -261,18 +342,53 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Input Area */}
       <div className="absolute bottom-0 w-full bg-[#f0f2f5] p-2 flex items-center gap-2 z-20 border-t border-gray-200">
+        
+        {/* Hidden File Input */}
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          onChange={handleFileSelect} 
+          className="hidden" 
+          accept="image/*,application/pdf"
+        />
+
+        {/* Paperclip Button */}
+        <button 
+           onClick={() => fileInputRef.current?.click()}
+           className="p-3 bg-gray-200 rounded-full text-gray-600 hover:bg-gray-300 transition"
+           disabled={isLoading}
+        >
+           <Paperclip className="w-5 h-5" />
+        </button>
+
+        {selectedFile && (
+           <div className="absolute bottom-16 left-4 bg-white p-2 rounded-lg shadow-lg border border-gray-200 flex items-center gap-3 animate-in slide-in-from-bottom-2">
+              {selectedFile.type.startsWith('image') && selectedFile.previewUrl ? (
+                 <img src={selectedFile.previewUrl} className="w-10 h-10 object-cover rounded" />
+              ) : (
+                 <FileText className="w-10 h-10 text-red-500" />
+              )}
+              <div className="flex flex-col">
+                 <span className="text-xs font-bold truncate max-w-[150px]">{selectedFile.name}</span>
+                 <span className="text-[10px] text-gray-500">Pronto para enviar</span>
+              </div>
+              <button onClick={clearFile} className="p-1 hover:bg-gray-100 rounded-full"><X className="w-4 h-4" /></button>
+           </div>
+        )}
+
         <input
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputText)}
-          placeholder="Mensagem..."
+          placeholder={selectedFile ? "Adicione uma legenda..." : "Mensagem..."}
           className="flex-1 rounded-lg border-none px-4 py-3 focus:ring-1 focus:ring-[#00a884] outline-none bg-white shadow-sm text-gray-700 placeholder-gray-400"
           disabled={isLoading}
         />
         
-        {inputText.length > 0 ? (
+        {inputText.length > 0 || selectedFile ? (
           <button 
             onClick={() => handleSendMessage(inputText)}
             disabled={isLoading}

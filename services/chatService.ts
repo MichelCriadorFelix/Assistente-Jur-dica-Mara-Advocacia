@@ -30,17 +30,20 @@ const mapDbContact = (row: any): Contact => ({
   unreadCount: row.unread_count,
   status: row.status as any,
   caseStatus: row.case_status || '',
-  legalSummary: row.legal_summary || '', // Mapeia o novo campo
+  legalSummary: row.legal_summary || '', 
   aiPaused: row.ai_paused || false
 });
 
 const mapDbMessage = (row: any): Message => ({
   id: row.id,
-  role: row.role as 'user' | 'model',
+  role: row.role as 'user' | 'model' | 'system',
   content: row.content,
-  type: row.type as 'text' | 'audio',
+  type: row.type as 'text' | 'audio' | 'file',
   timestamp: new Date(row.created_at),
-  audioUrl: row.audio_url
+  audioUrl: row.audio_url,
+  fileUrl: row.file_url,
+  fileName: row.file_name,
+  mimeType: row.mime_type
 });
 
 export const chatService = {
@@ -116,14 +119,22 @@ export const chatService = {
          content: message.content || '',
          type: message.type || 'text',
          timestamp: new Date(),
-         audioUrl: message.audioUrl
+         audioUrl: message.audioUrl,
+         fileUrl: message.fileUrl,
+         fileName: message.fileName,
+         mimeType: message.mimeType
        };
        if (!db.messages[contactId]) db.messages[contactId] = [];
        db.messages[contactId].push(newMessage);
        
        const idx = db.contacts.findIndex(c => c.id === contactId);
        if (idx >= 0) {
-         db.contacts[idx].lastMessage = message.type === 'audio' ? '🎵 Áudio' : (message.content || '');
+         let preview = message.content || '';
+         if (message.type === 'audio') preview = '🎵 Áudio';
+         if (message.type === 'file') preview = '📎 Anexo';
+         if (message.role === 'system') preview = '⚠️ Notificação';
+         
+         db.contacts[idx].lastMessage = preview;
          db.contacts[idx].time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
          const c = db.contacts.splice(idx, 1)[0];
          db.contacts.unshift(c);
@@ -137,11 +148,18 @@ export const chatService = {
       role: message.role,
       content: message.content,
       type: message.type || 'text',
-      audio_url: message.audioUrl
+      audio_url: message.audioUrl,
+      file_url: message.fileUrl,
+      file_name: message.fileName,
+      mime_type: message.mimeType
     }]);
+    
+    let preview = message.content || '';
+    if (message.type === 'audio') preview = '🎵 Áudio';
+    if (message.type === 'file') preview = '📎 Anexo';
 
     await supabase.from('contacts').update({
-      last_message: message.type === 'audio' ? '🎵 Áudio' : message.content,
+      last_message: preview,
       updated_at: new Date().toISOString(),
       unread_count: 0
     }).eq('id', contactId);

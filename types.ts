@@ -2,9 +2,12 @@ export interface Message {
   id: string;
   role: 'user' | 'model' | 'system';
   content: string;
-  type: 'text' | 'audio';
+  type: 'text' | 'audio' | 'file';
   timestamp: Date;
-  audioUrl?: string; // For playback
+  audioUrl?: string; // Para áudio
+  fileUrl?: string; // Para imagens/PDFs
+  fileName?: string; // Nome do arquivo
+  mimeType?: string; // Tipo do arquivo (image/png, application/pdf)
 }
 
 export interface Contact {

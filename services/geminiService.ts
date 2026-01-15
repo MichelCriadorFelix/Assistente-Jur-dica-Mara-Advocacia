@@ -93,9 +93,15 @@ const tools: Tool[] = [{ functionDeclarations: [notifyTeamFunction, saveKnowledg
 
 // --- SERVIÇO PRINCIPAL ---
 
+export interface GeminiInput {
+  text?: string;
+  mediaBase64?: string; // Unificado para Audio/Imagem/PDF
+  mimeType?: string;
+}
+
 export const sendMessageToGemini = async (
   history: Message[],
-  newMessage: { text?: string; audioBase64?: string; mimeType?: string },
+  newMessage: GeminiInput,
   systemInstruction: string,
   onToolCall?: (toolCall: any) => void,
   contactContext?: Contact | null 
@@ -130,21 +136,35 @@ export const sendMessageToGemini = async (
   }
 
   // Prepara histórico (limita para manter foco)
-  const recentHistory = history.slice(-20).map(m => ({
-    role: m.role,
-    parts: [{ text: m.type === 'audio' ? '[O USUÁRIO ENVIOU UM ÁUDIO]' : m.content }]
-  }));
+  const recentHistory = history.slice(-20).map(m => {
+    // Se a mensagem histórica tinha arquivo, indicamos isso no texto pois o histórico simples do Gemini SDK não suporta reenvio de blobs antigos facilmente sem cache
+    let content = m.content;
+    if (m.type === 'file') content = `[USUÁRIO ENVIOU ARQUIVO: ${m.fileName}] ${m.content}`;
+    if (m.type === 'audio') content = `[USUÁRIO ENVIOU ÁUDIO]`;
+    
+    return {
+      role: m.role,
+      parts: [{ text: content }]
+    };
+  });
 
   const currentParts: Part[] = [];
   
-  if (newMessage.audioBase64) {
+  if (newMessage.mediaBase64) {
     currentParts.push({
       inlineData: {
-        mimeType: newMessage.mimeType || 'audio/webm',
-        data: newMessage.audioBase64
+        mimeType: newMessage.mimeType || 'application/octet-stream',
+        data: newMessage.mediaBase64
       }
     });
-    currentParts.push({ text: "O usuário enviou este ÁUDIO. Transcreva mentalmente a intenção, ignore erros de português e responda como uma advogada humana e empática." });
+
+    if (newMessage.mimeType?.startsWith('audio')) {
+       currentParts.push({ text: "O usuário enviou este ÁUDIO. Transcreva mentalmente a intenção e responda." });
+    } else if (newMessage.mimeType?.startsWith('image')) {
+       currentParts.push({ text: "O usuário enviou esta IMAGEM. Analise o conteúdo visual (documento, foto) para ajudar no atendimento." });
+    } else if (newMessage.mimeType === 'application/pdf') {
+       currentParts.push({ text: "O usuário enviou este PDF. Analise o conteúdo do documento." });
+    }
   }
   
   if (newMessage.text) {
@@ -163,13 +183,12 @@ export const sendMessageToGemini = async (
           config: { 
             systemInstruction: finalPrompt,
             tools,
-            temperature: 0.3, // Temperatura mais baixa para ser mais fiel ao roteiro técnico
+            temperature: 0.3,
           },
           history: recentHistory
         });
 
-        // Timeout de segurança
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 20000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 25000)); // Mais tempo para imagens/PDF
         const apiPromise = chat.sendMessage({ message: currentParts });
         
         const result: any = await Promise.race([apiPromise, timeoutPromise]);
@@ -186,16 +205,16 @@ export const sendMessageToGemini = async (
                 responseText = toolResp.text;
              }
              else if (call.name === 'notificar_equipe' && onToolCall) {
-                // Formata o resumo jurídico rico para salvar no banco
                 const args = call.args;
                 const richSummary = `
-                  [RELATÓRIO TRIAGEM]
-                  - Idade: ${args.clientAge || '?'}
-                  - Status: ${args.workStatus || '?'}
-                  - Tempo Contrib.: ~${args.estimatedContributionTime || '?'}
-                  - Pausa: ${args.timeSinceLastContribution || 'N/A'}
-                  - Gov.br: ${args.govBrCredentials || 'PENDENTE'}
-                  - Resumo: ${args.summary}
+[RELATÓRIO TRIAGEM]
+- Nome: ${args.clientName}
+- Idade: ${args.clientAge || '?'}
+- Status: ${args.workStatus || '?'}
+- Tempo Contrib.: ~${args.estimatedContributionTime || '?'}
+- Pausa: ${args.timeSinceLastContribution || 'N/A'}
+- Gov.br: ${args.govBrCredentials || 'PENDENTE'}
+- Resumo: ${args.summary}
                 `.trim();
 
                 onToolCall({ 
@@ -208,7 +227,7 @@ export const sendMessageToGemini = async (
                   } 
                 });
                 const toolResp = await chat.sendMessage({
-                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório Detalhado enviado com Sucesso para Dr. Michel." } } }]
+                  message: [{ functionResponse: { name: call.name, response: { result: "Relatório gerado e enviado com sucesso para a equipe." } } }]
                 });
                 responseText = toolResp.text;
              }
@@ -226,7 +245,7 @@ export const sendMessageToGemini = async (
   }
 
   console.error("Todas as tentativas falharam.", lastError);
-  return "Desculpe, o sinal falhou. Pode enviar novamente?";
+  return "Desculpe, não consegui abrir o arquivo ou processar a mensagem. Podemos tentar de novo?";
 };
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {

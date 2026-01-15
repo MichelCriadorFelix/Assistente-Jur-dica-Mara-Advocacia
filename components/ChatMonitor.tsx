@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Message, Contact, AppConfig } from '../types';
-import { Search, Bot, User, RefreshCw, Save, Filter, FileText, Check, Send, AlertTriangle, PlayCircle, PauseCircle } from 'lucide-react';
+import { Search, Bot, User, RefreshCw, Save, Filter, FileText, Check, Send, AlertTriangle, PlayCircle, PauseCircle, ClipboardList } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 
@@ -28,6 +28,9 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
   // Estado do Prontuário (Case Status)
   const [caseStatusText, setCaseStatusText] = useState('');
   const [isSavingStatus, setIsSavingStatus] = useState(false);
+  
+  // Controle da Aba Direita (Status vs Relatório)
+  const [rightPanelTab, setRightPanelTab] = useState<'status' | 'report'>('status');
 
   const fetchContacts = async () => {
     // Silent update to not disrupt UI if user is typing
@@ -37,8 +40,14 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
     // Se o contato selecionado mudou (ex: IA pausada), atualiza o estado local
     if (selectedContact) {
        const updated = data.find(c => c.id === selectedContact.id);
-       if (updated && updated.aiPaused !== selectedContact.aiPaused) {
-         setSelectedContact(prev => prev ? { ...prev, aiPaused: updated.aiPaused } : null);
+       if (updated) {
+         if (updated.aiPaused !== selectedContact.aiPaused) {
+           setSelectedContact(prev => prev ? { ...prev, aiPaused: updated.aiPaused } : null);
+         }
+         // Se acabou de ser triado, atualiza o resumo
+         if (updated.status === 'triaged' && selectedContact.status !== 'triaged') {
+            setSelectedContact(prev => prev ? { ...prev, status: 'triaged', legalSummary: updated.legalSummary } : null);
+         }
        }
     }
   };
@@ -65,6 +74,13 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       });
       setCaseStatusText(selectedContact.caseStatus || '');
+      
+      // Se estiver concluído, mostra o relatório por padrão
+      if (selectedContact.status === 'triaged') {
+         setRightPanelTab('report');
+      } else {
+         setRightPanelTab('status');
+      }
     }
   }, [selectedContact]);
 
@@ -195,6 +211,7 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                  <div className="relative">
                    <img src={contact.avatar} alt={contact.name} className="w-12 h-12 rounded-full object-cover" />
                    {contact.status === 'urgent' && <span className="absolute bottom-0 right-0 w-3 h-3 bg-red-500 border-2 border-white rounded-full"></span>}
+                   {contact.status === 'triaged' && <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
                    {contact.aiPaused && <span className="absolute top-0 left-0 w-3 h-3 bg-blue-500 border-2 border-white rounded-full animate-pulse" title="Intervenção Humana Ativa"></span>}
                  </div>
                  <div className="flex-1 min-w-0">
@@ -203,7 +220,7 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                      <span className="text-xs text-gray-500">{contact.time}</span>
                    </div>
                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate flex items-center gap-1">
-                     {contact.aiPaused && <User className="w-3 h-3 text-blue-500" />}
+                     {contact.status === 'triaged' && <Check className="w-3 h-3 text-green-500" />}
                      {contact.lastMessage}
                    </p>
                  </div>
@@ -228,9 +245,9 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                        </span>
                      )}
                    </div>
-                   {selectedContact?.caseStatus && !showPromptEdit && (
-                     <span className="text-xs text-yellow-600 flex items-center gap-1">
-                       <FileText className="w-3 h-3" /> Info Processual Ativa
+                   {selectedContact?.status === 'triaged' && !showPromptEdit && (
+                     <span className="text-xs text-green-600 flex items-center gap-1">
+                       <Check className="w-3 h-3" /> Triagem Completa
                      </span>
                    )}
                  </div>
@@ -280,14 +297,28 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                      ) : messages.length > 0 ? (
                           messages.map(msg => (
                             <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
-                              <div className={`flex items-start max-w-xl gap-2 ${msg.role === 'user' ? 'flex-row' : 'flex-row-reverse'}`}>
-                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-gray-300' : 'bg-emerald-600'}`}>
-                                    {msg.role === 'user' ? <User className="w-5 h-5 text-gray-600" /> : <Bot className="w-5 h-5 text-white" />}
-                                  </div>
-                                  <div className={`p-3 rounded-lg shadow-sm text-sm ${msg.role === 'user' ? 'bg-white dark:bg-gray-800 border' : 'bg-emerald-600 text-white'}`}>
-                                    {msg.content}
-                                  </div>
-                              </div>
+                              {msg.role === 'system' ? (
+                                 <div className="w-full flex justify-center">
+                                    <div className="bg-yellow-50 text-yellow-800 text-xs px-4 py-2 rounded border border-yellow-200 text-center font-mono">
+                                       {msg.content}
+                                    </div>
+                                 </div>
+                              ) : (
+                                <div className={`flex items-start max-w-xl gap-2 ${msg.role === 'user' ? 'flex-row' : 'flex-row-reverse'}`}>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-gray-300' : 'bg-emerald-600'}`}>
+                                      {msg.role === 'user' ? <User className="w-5 h-5 text-gray-600" /> : <Bot className="w-5 h-5 text-white" />}
+                                    </div>
+                                    <div className={`p-3 rounded-lg shadow-sm text-sm ${msg.role === 'user' ? 'bg-white dark:bg-gray-800 border' : 'bg-emerald-600 text-white'}`}>
+                                      {msg.type === 'file' && (
+                                        <div className="mb-2 flex items-center gap-2 bg-black/10 p-1 rounded">
+                                           <FileText className="w-4 h-4" />
+                                           <span className="text-xs truncate max-w-[150px]">{msg.fileName || 'Arquivo'}</span>
+                                        </div>
+                                      )}
+                                      {msg.content}
+                                    </div>
+                                </div>
+                              )}
                             </div>
                           ))
                      ) : (
@@ -336,36 +367,67 @@ const ChatMonitor: React.FC<ChatMonitorProps> = ({ config, onUpdateConfig, initi
                    )}
                 </div>
 
-                {/* Right Panel: Case Status / Prontuário */}
+                {/* Right Panel: Case Status OR Legal Report */}
                 {!showPromptEdit && (
-                  <div className="w-80 bg-white dark:bg-gray-800 border-l dark:border-gray-700 p-4 flex flex-col shadow-xl z-20">
-                     <div className="flex items-center gap-2 mb-4 text-gray-700 dark:text-gray-200 font-semibold border-b pb-2 dark:border-gray-700">
-                        <FileText className="w-5 h-5 text-blue-500" />
-                        <h3>Status do Caso</h3>
-                     </div>
+                  <div className="w-80 bg-white dark:bg-gray-800 border-l dark:border-gray-700 flex flex-col shadow-xl z-20">
                      
-                     <div className="flex-1 flex flex-col">
-                        <p className="text-xs text-gray-500 mb-2">
-                           Escreva aqui atualizações (audiências, perícias, valores). 
-                           <br/><strong className="text-emerald-600">A Mara lerá isso automaticamente</strong> e responderá ao cliente quando perguntado.
-                        </p>
-                        <textarea
-                           className="flex-1 w-full p-3 text-sm border rounded-lg bg-yellow-50 dark:bg-gray-900 border-yellow-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-yellow-400 outline-none resize-none mb-3"
-                           placeholder="Ex: Perícia agendada para 25/10. Processo aguardando cálculo."
-                           value={caseStatusText}
-                           onChange={(e) => setCaseStatusText(e.target.value)}
-                        />
+                     {/* Tabs */}
+                     <div className="flex border-b dark:border-gray-700">
                         <button 
-                          onClick={handleSaveCaseStatus}
-                          disabled={isSavingStatus}
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition"
+                          onClick={() => setRightPanelTab('status')}
+                          className={`flex-1 p-3 text-sm font-medium border-b-2 transition ${rightPanelTab === 'status' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'}`}
                         >
-                          {isSavingStatus ? 'Salvando...' : <><Save className="w-4 h-4" /> Atualizar Informação</>}
+                          Status
                         </button>
-                        {selectedContact?.caseStatus && (
-                           <div className="mt-3 text-xs text-green-600 flex items-center gap-1 justify-center">
-                              <Check className="w-3 h-3" /> Informação disponível para IA
-                           </div>
+                        <button 
+                          onClick={() => setRightPanelTab('report')}
+                          className={`flex-1 p-3 text-sm font-medium border-b-2 transition ${rightPanelTab === 'report' ? 'border-green-500 text-green-600' : 'border-transparent text-gray-500'}`}
+                        >
+                          Relatório
+                        </button>
+                     </div>
+
+                     <div className="p-4 flex-1 flex flex-col overflow-y-auto">
+                        {rightPanelTab === 'status' ? (
+                          <>
+                             <div className="flex items-center gap-2 mb-4 text-gray-700 dark:text-gray-200 font-semibold">
+                                <FileText className="w-5 h-5 text-blue-500" />
+                                <h3>Info. Processual</h3>
+                             </div>
+                             <p className="text-xs text-gray-500 mb-2">
+                               Atualize aqui andamentos do processo. A Mara usa isso para responder o cliente.
+                             </p>
+                             <textarea
+                                className="flex-1 w-full p-3 text-sm border rounded-lg bg-yellow-50 dark:bg-gray-900 border-yellow-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-yellow-400 outline-none resize-none mb-3 min-h-[200px]"
+                                placeholder="Ex: Perícia agendada para 25/10. Processo aguardando cálculo."
+                                value={caseStatusText}
+                                onChange={(e) => setCaseStatusText(e.target.value)}
+                             />
+                             <button 
+                               onClick={handleSaveCaseStatus}
+                               disabled={isSavingStatus}
+                               className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition"
+                             >
+                               {isSavingStatus ? 'Salvando...' : <><Save className="w-4 h-4" /> Atualizar</>}
+                             </button>
+                          </>
+                        ) : (
+                          <>
+                             <div className="flex items-center gap-2 mb-4 text-gray-700 dark:text-gray-200 font-semibold">
+                                <ClipboardList className="w-5 h-5 text-green-500" />
+                                <h3>Relatório da IA</h3>
+                             </div>
+                             {selectedContact?.legalSummary ? (
+                               <div className="bg-green-50 border border-green-200 p-3 rounded-lg text-sm font-mono text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                                  {selectedContact.legalSummary}
+                               </div>
+                             ) : (
+                               <div className="text-center text-gray-400 py-10">
+                                  <p>Nenhum relatório gerado ainda.</p>
+                                  <p className="text-xs mt-2">Aguarde a IA concluir a triagem.</p>
+                               </div>
+                             )}
+                          </>
                         )}
                      </div>
                   </div>
