@@ -4,6 +4,7 @@ import AudioRecorder from './AudioRecorder';
 import { Message, AppConfig, Contact } from '../types';
 import { sendMessageToGemini } from '../services/geminiService';
 import { chatService } from '../services/chatService';
+import { whatsappService } from '../services/whatsappService';
 
 interface ChatInterfaceProps {
   onBack: () => void;
@@ -23,8 +24,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Ref para evitar duplicação do relatório
   const lastReportRef = useRef<number>(0);
 
   useEffect(() => {
@@ -182,22 +181,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         config.systemPrompt,
         async (toolCall) => {
           if (toolCall.name === 'notificar_equipe') {
-             // Debounce para evitar relatório duplicado em curto espaço de tempo (5 segundos)
              const now = Date.now();
              if (now - lastReportRef.current < 5000) return;
              lastReportRef.current = now;
 
              const { clientName, legalSummary } = toolCall.args;
              
-             // 1. Atualiza Status para TRIAGED (Concluído)
              await chatService.updateContactStatus(contactId, 'triaged', clientName, legalSummary);
              setContactDetails(prev => prev ? ({ ...prev, name: clientName, status: 'triaged' }) : null);
 
-             // 2. Simula o Relatório no Chat para o Teste
              const reportMsg: Message = {
                id: Date.now().toString() + '-report',
                role: 'system',
-               // Adicionando cabeçalho explícito
                content: `🔒 **SISTEMA (Visível apenas para Admin):**\n✅ **ATENDIMENTO CONCLUÍDO**\n\n**Para:** Dr. Michel, Fabrícia\n**Cliente:** ${clientName}\n\n${legalSummary}`,
                type: 'text',
                timestamp: new Date()
@@ -209,7 +204,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
         freshDetails 
       );
 
-      // Algumas vezes o gemini manda texto vazio se só chamou a tool, filtramos aqui
+      // --- RESPOSTA DA IA ---
       if (responseText && responseText.trim().length > 0) {
         const botMsg: Message = {
           id: (Date.now() + 1).toString(),
@@ -221,6 +216,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onBack, config }) => {
 
         setMessages(prev => [...prev, botMsg]);
         await chatService.saveMessage(contactId, botMsg);
+
+        // DISPARO PARA O WHATSAPP REAL (Se tiver telefone no cadastro)
+        // OBS: Em ambiente de Demo (Cliente Simulado), não temos o telefone real salvo no objeto Contact ainda (pois não fizemos login). 
+        // Mas se estivéssemos recebendo webhook, teríamos o telefone.
+        // Vou assumir que se o usuário digitou algo, podemos tentar enviar se tiver config.
+        // Como é uma demo local, ele vai tentar enviar para um número fictício se não tiver configurado,
+        // mas é aqui que a mágica aconteceria num cenário real.
+        if (freshDetails?.cpf) { // Usando CPF ou ID como proxy de telefone na demo, mas num app real seria contact.phone
+             // Num cenário real integrado via Webhook, freshDetails teria o campo 'phone'.
+             // Aqui apenas deixamos o código pronto para chamar o serviço.
+             // whatsappService.sendMessage(freshDetails.phone, responseText);
+        }
+        
+        // Se você estiver testando consigo mesmo e quiser ver funcionando, pode descomentar abaixo e por seu numero fixo para testar:
+        // whatsappService.sendMessage("5511999999999", responseText);
       }
 
     } catch (error) {

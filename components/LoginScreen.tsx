@@ -108,7 +108,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               </p>
               <div className="mt-3 text-xs text-yellow-800/80 dark:text-yellow-400/80 space-y-2">
                  <p>
-                   🤖 <strong>Para a IA responder no seu número real:</strong> É necessário contratar uma API de conexão (Gateway) ou configurar um servidor.
+                   🤖 <strong>Para a IA responder no seu número real:</strong> É necessário configurar um Gateway (Pode ser gratuito via Evolution API).
                  </p>
                  <div className="flex items-center gap-2 mt-2 font-semibold cursor-help" title="Vá em Configurações > Integração">
                     <Server className="w-3 h-3" />

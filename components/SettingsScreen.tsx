@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Key, Users, Save, Trash2, Plus, Bot, Phone, CheckCircle, AlertCircle, Server, Globe, ShieldCheck } from 'lucide-react';
+import { Database, Key, Users, Save, Trash2, Plus, Bot, Phone, CheckCircle, AlertCircle, Server, Globe, ShieldCheck, Cpu, ExternalLink, ChevronDown, ChevronUp, Copy, Terminal } from 'lucide-react';
 import { chatService } from '../services/chatService';
 import { getAvailableApiKeys, testConnection, getAvailableApiKeysMap } from '../services/geminiService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
@@ -24,6 +24,7 @@ const SettingsScreen: React.FC = () => {
      apiToken: '',
      instanceName: ''
   });
+  const [showTutorial, setShowTutorial] = useState(false);
   
   const sbUrlDisplay = 'https://drcxpekguouqsoinaoeb.supabase.co';
 
@@ -125,8 +126,15 @@ const SettingsScreen: React.FC = () => {
   };
   
   const handleSaveWhatsapp = () => {
-     localStorage.setItem('mara_whatsapp_config', JSON.stringify(waConfig));
-     alert("Configuração de Gateway salva. \n\nNota: Para que funcione, você precisa configurar o Webhook na sua plataforma de API (Evolution/Z-API) apontando para este App.");
+     // Pequena limpeza na URL para evitar erros comuns
+     let cleanUrl = waConfig.apiUrl.trim();
+     if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+     
+     const finalConfig = { ...waConfig, apiUrl: cleanUrl };
+     
+     localStorage.setItem('mara_whatsapp_config', JSON.stringify(finalConfig));
+     setWaConfig(finalConfig);
+     alert("Configuração de Gateway salva.");
   };
 
   const handleClearLocalData = () => {
@@ -325,16 +333,68 @@ const SettingsScreen: React.FC = () => {
       {/* TAB: WHATSAPP INTEGRATION */}
       {activeTab === 'whatsapp' && (
          <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md border border-gray-100 dark:border-gray-700">
-             <div className="flex items-center gap-3 mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800 rounded-lg text-yellow-800 dark:text-yellow-500">
-                 <Server className="w-8 h-8 flex-shrink-0" />
-                 <div className="text-sm">
-                    <p className="font-bold">Para conectar seu número real, você precisa de um Gateway.</p>
-                    <p className="mt-1">Este Web App funciona como o "cérebro" da IA. Para que ela "tenha um corpo" (WhatsApp), ela precisa ser ligada a uma API como <strong>Evolution API, Z-API ou Twilio</strong>.</p>
-                 </div>
+             
+             {/* Info Cards */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800 rounded-lg text-yellow-800 dark:text-yellow-500">
+                    <div className="flex items-center gap-2 mb-2 font-bold">
+                       <Server className="w-5 h-5" />
+                       <h3>Opção Paga (Z-API/Twilio)</h3>
+                    </div>
+                    <p className="text-sm">Mais fácil de configurar, mas tem mensalidade. Ideal se você não quer lidar com servidores.</p>
+                </div>
+
+                <div className={`p-4 border rounded-lg transition-all cursor-pointer ${showTutorial ? 'bg-emerald-100 border-emerald-300 ring-2 ring-emerald-500' : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`} onClick={() => setShowTutorial(!showTutorial)}>
+                    <div className="flex items-center justify-between gap-2 mb-2 font-bold text-emerald-800 dark:text-emerald-500">
+                       <div className="flex items-center gap-2">
+                          <Cpu className="w-5 h-5" />
+                          <h3>Opção Gratuita (Docker)</h3>
+                       </div>
+                       {showTutorial ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}
+                    </div>
+                    <p className="text-sm text-emerald-700">Clique para ver o guia de como instalar a Evolution API no seu PC.</p>
+                </div>
              </div>
 
+             {/* TUTORIAL EXPANDABLE */}
+             {showTutorial && (
+               <div className="mb-8 bg-gray-900 text-gray-300 p-6 rounded-lg font-mono text-sm border border-gray-700 shadow-inner animate-in slide-in-from-top-4">
+                  <h4 className="text-white font-bold mb-4 flex items-center gap-2"><Terminal className="w-4 h-4"/> Guia de Instalação Local</h4>
+                  
+                  <ol className="list-decimal pl-5 space-y-4">
+                     <li>
+                        <p>Instale o <strong>Docker Desktop</strong> no Windows.</p>
+                     </li>
+                     <li>
+                        <p>Crie um arquivo chamado <span className="text-yellow-400">docker-compose.yml</span> com este conteúdo:</p>
+                        <div className="bg-black p-3 rounded mt-2 text-xs overflow-x-auto border border-gray-800">
+                           <pre>{`version: '3.3'
+services:
+  evolution-api:
+    image: attias/evolution-api:latest
+    restart: always
+    ports: ["8080:8080"]
+    environment:
+      - SERVER_URL=http://localhost:8080
+      - API_KEY=marasecretkey123
+      - AUTHENTICATION_API_KEY=marasecretkey123`}</pre>
+                        </div>
+                     </li>
+                     <li>
+                        <p>Abra o CMD na pasta e rode: <span className="text-green-400">docker-compose up -d</span></p>
+                     </li>
+                     <li>
+                        <p>Instale o <strong>Ngrok</strong> e rode: <span className="text-green-400">ngrok http 8080</span></p>
+                     </li>
+                     <li>
+                        <p>Copie o link HTTPS do Ngrok e cole abaixo em "URL Base".</p>
+                     </li>
+                  </ol>
+               </div>
+             )}
+
              <h2 className="text-lg font-bold dark:text-white flex items-center gap-2 mb-6">
-                <Globe className="w-5 h-5 text-purple-600" /> Configuração do Gateway (API Externa)
+                <Globe className="w-5 h-5 text-purple-600" /> Configuração do Gateway
              </h2>
 
              <div className="space-y-4">
@@ -342,27 +402,28 @@ const SettingsScreen: React.FC = () => {
                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nome da Instância</label>
                    <input 
                      type="text" 
-                     placeholder="Ex: Escritorio_Dr_Michel"
+                     placeholder="Ex: Escritorio"
                      className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
                      value={waConfig.instanceName}
                      onChange={e => setWaConfig({...waConfig, instanceName: e.target.value})}
                    />
                 </div>
                 <div>
-                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">URL da API (Webhook de Envio)</label>
+                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">URL Base da API (Ngrok ou Z-API)</label>
                    <input 
                      type="text" 
-                     placeholder="Ex: https://api.z-api.io/instances/..."
+                     placeholder="Ex: https://a1b2.ngrok-free.app (Sem /message no final)"
                      className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
                      value={waConfig.apiUrl}
                      onChange={e => setWaConfig({...waConfig, apiUrl: e.target.value})}
                    />
+                   <p className="text-xs text-gray-400 mt-1">Cole apenas a raiz da URL (ex: o link do Ngrok).</p>
                 </div>
                 <div>
-                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Token de Acesso / Secret</label>
+                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Token de Acesso (API Key)</label>
                    <input 
                      type="password" 
-                     placeholder="Cole o token da sua API aqui"
+                     placeholder="Ex: marasecretkey123"
                      className="w-full p-2 border rounded dark:bg-gray-700 dark:text-white"
                      value={waConfig.apiToken}
                      onChange={e => setWaConfig({...waConfig, apiToken: e.target.value})}
@@ -377,7 +438,7 @@ const SettingsScreen: React.FC = () => {
                       <ShieldCheck className="w-5 h-5" /> Salvar Configuração de API
                    </button>
                    <p className="text-xs text-center text-gray-400 mt-3">
-                      * Ao salvar, você deve configurar o <strong>Webhook</strong> na sua plataforma de API para apontar para este app.
+                      * Certifique-se de configurar o Webhook na Evolution API apontando para cá (se estiver usando backend).
                    </p>
                 </div>
              </div>
